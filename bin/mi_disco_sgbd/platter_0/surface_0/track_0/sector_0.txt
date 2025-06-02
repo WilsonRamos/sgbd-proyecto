@@ -1,0 +1,9 @@
+# Sector: P0_S0_T0_SEC0
+# Fecha: 2025-05-31 23:27:01
+# Relación: Empleados
+# Registros: 1
+# Ocupación: 3.36914%
+# =================================
+BLOCK_HEADER|P0_S0_T0_SEC0|4096|138|Empleados|1
+OFFSET_TABLE|64
+RECORD|VARIABLE|1|0|P0_S0_T0_SEC0|66|37,42,46|juan,12,esodskfdskfjskdjfhs

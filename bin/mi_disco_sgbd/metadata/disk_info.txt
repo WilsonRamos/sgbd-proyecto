@@ -1,0 +1,5 @@
+# Información del Disco SGBD
+created=2025-05-31 23:23:56
+base_path=./mi_disco_sgbd
+total_capacity=549755813888
+total_sectors=134217728

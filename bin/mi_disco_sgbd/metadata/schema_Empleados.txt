@@ -1,0 +1,6 @@
+# Esquema de la tabla: Empleados
+record_type=VARIABLE
+field_count=3
+nombre|2|30|0
+edad|0|0|0
+comentario|2|200|0

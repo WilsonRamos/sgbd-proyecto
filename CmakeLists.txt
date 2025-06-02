@@ -1,0 +1,100 @@
+cmake_minimum_required(VERSION 3.10)
+project(SGBD_Fisico)
+
+# Configurar estándar C++
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Configuraciones del compilador
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_compile_options(-Wall -Wextra -O2)
+endif()
+
+# Incluir directorios de headers
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+# Archivos fuente
+set(SOURCES
+    src/main.cpp
+)
+
+# Archivos de cabecera
+set(HEADERS
+    include/PhysicalAddress.h
+    include/DiskConfig.h
+    include/Record.h
+    include/Block.h
+    include/FileSystemSimulator.h
+    include/DiskManager.h
+)
+
+# Crear ejecutable principal
+add_executable(sgbd_fisico ${SOURCES} ${HEADERS})
+
+# Enlazar con la biblioteca del sistema de archivos si es necesario
+target_link_libraries(sgbd_fisico stdc++fs)
+
+# Configuraciones específicas del sistema
+if(WIN32)
+    # Configuraciones para Windows
+    target_compile_definitions(sgbd_fisico PRIVATE _WIN32_WINNT=0x0601)
+elseif(UNIX)
+    # Configuraciones para Unix/Linux
+    find_package(Threads REQUIRED)
+    target_link_libraries(sgbd_fisico Threads::Threads)
+endif()
+
+# Crear directorio de salida
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+# Configurar instalación
+install(TARGETS sgbd_fisico 
+        RUNTIME DESTINATION bin)
+
+# Tests (opcional)
+enable_testing()
+
+# Test básico
+add_test(NAME test_basic 
+         COMMAND sgbd_fisico --test
+         WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+# Documentación
+find_package(Doxygen)
+if(DOXYGEN_FOUND)
+    set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in)
+    set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+    
+    configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+    
+    add_custom_target(doc_doxygen ALL
+        COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Generando documentación con Doxygen"
+        VERBATIM)
+endif()
+
+# Mostrar información de configuración
+message(STATUS "=== CONFIGURACIÓN DEL PROYECTO ===")
+message(STATUS "Nombre del proyecto: ${PROJECT_NAME}")
+message(STATUS "Compilador C++: ${CMAKE_CXX_COMPILER}")
+message(STATUS "Estándar C++: ${CMAKE_CXX_STANDARD}")
+message(STATUS "Directorio de construcción: ${CMAKE_BINARY_DIR}")
+message(STATUS "Directorio de fuentes: ${CMAKE_SOURCE_DIR}")
+message(STATUS "Sistema operativo: ${CMAKE_SYSTEM_NAME}")
+message(STATUS "===================================")
+
+# Targets adicionales
+add_custom_target(clean-all
+    COMMAND ${CMAKE_BUILD_TOOL} clean
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bin
+    COMMENT "Limpieza completa del proyecto")
+
+add_custom_target(run
+    COMMAND ${CMAKE_BINARY_DIR}/bin/sgbd_fisico
+    DEPENDS sgbd_fisico
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Ejecutar el SGBD Físico")
