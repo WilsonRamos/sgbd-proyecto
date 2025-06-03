@@ -1,0 +1,5 @@
+# Información del Disco SGBD
+created=2025-06-03 10:27:46
+base_path=./disco_variables
+total_capacity=26214400
+total_sectors=6400

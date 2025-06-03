@@ -199,7 +199,7 @@ public:
  * @brief Registro de longitud variable
  * 
  * Los campos pueden tener tamaños variables, requiere header con
- * información de offsets (como Fig 13.23 del documento)
+ * información de offsets 
  */
 class VariableRecord : public Record {
 private:

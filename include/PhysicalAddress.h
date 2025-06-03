@@ -6,10 +6,8 @@
 #include <sstream>
 
 /**
- * @brief Representa una dirección física en el disco simulado
- * 
+ *Representa una dirección física en el disco simulado
  * Estructura jerárquica: Plato -> Superficie -> Pista -> Sector
- * Basado en la arquitectura de discos magnéticos del capítulo 13
  */
 class PhysicalAddress {
 private:
@@ -19,16 +17,9 @@ private:
     int sector;     // Número de sector (0-n)
 
 public:
-    /**
-     * @brief Constructor por defecto
-     */
+    
     PhysicalAddress() : platter(0), surface(0), track(0), sector(0) {}
-
-    /**
-     * @brief Constructor con parámetros
-     */
-    PhysicalAddress(int p, int s, int t, int sec) 
-        : platter(p), surface(s), track(t), sector(sec) {}
+    PhysicalAddress(int p, int s, int t, int sec) : platter(p), surface(s), track(t), sector(sec) {}
 
     // Getters
     int getPlatter() const { return platter; }

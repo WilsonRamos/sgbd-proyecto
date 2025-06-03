@@ -1,0 +1,12 @@
+# Sector: P0_S0_T0_SEC0
+# Fecha: 2025-06-03 10:27:46
+# Relación: empleados_fijos
+# Registros: 4
+# Ocupación: 11.7188%
+# =================================
+BLOCK_HEADER|P0_S0_T0_SEC0|4096|480|empleados_fijos|4
+OFFSET_TABLE|64,168,272,376
+RECORD|FIXED|1|0|P0_S0_T0_SEC0|Juan,30,Dev,75000
+RECORD|FIXED|2|0|P0_S0_T0_SEC0|Maria del Carmen,28,Senior Developer,85000
+RECORD|FIXED|3|0|P0_S0_T0_SEC0|Luis,35,PM,90000
+RECORD|FIXED|4|0|P0_S0_T0_SEC0|Ana Gabriela Martinez,32,Tech Lead,95000
