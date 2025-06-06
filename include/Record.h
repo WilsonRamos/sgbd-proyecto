@@ -22,7 +22,7 @@ enum class FieldType {
 /**
  * @brief Estructura para definir un campo del registro
  */
-struct FieldDefinition {
+struct FieldDefinition { 
     std::string name;
     FieldType type;
     size_t max_length;  // Para strings, 0 para tipos de longitud fija
@@ -112,7 +112,7 @@ public:
  * @brief Registro de longitud fija
  * 
  * Todos los campos tienen tamaño fijo, permitiendo acceso directo
- * y cálculos de offset simples (como Example 13.15 del documento)
+ * y cálculos de offset simples (como Example 13.15 )
  */
 class FixedRecord : public Record {
 private:
