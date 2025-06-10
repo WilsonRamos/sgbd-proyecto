@@ -1,12 +1,11 @@
 # Makefile para SGBD Físico Simple
 # Compilación alternativa sin CMake
 
-# Configuración del compilador
+# Configuración del compilador (menos estricta)
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2
+CXXFLAGS = -std=c++17 -Wall -O2 -Wno-unused-parameter -Wno-sign-compare
 INCLUDES = -I./include
 LIBS = -lstdc++fs
-
 # Directorios
 SRC_DIR = src
 INCLUDE_DIR = include
