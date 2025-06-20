@@ -25,7 +25,7 @@
  * - Operaciones CRUD básicas
  */
 class DiskManager {
-private:
+protected:
     DiskConfig config;
     FileSystemSimulator filesystem;
     std::map<PhysicalAddress, std::shared_ptr<Block>> block_cache;  // Cache de bloques
@@ -39,9 +39,18 @@ private:
     double total_access_time;
 
 public:
-    /**
-     * @brief Constructor
-     */
+
+      // Método para que BufferPool acceda al FileSystem
+
+    FileSystemSimulator* getFileSystemPtr() { return &filesystem; }
+    const std::string& getBasePath() const { return filesystem.getBasePath(); }
+     
+    
+    bool writeBlock(const PhysicalAddress& addr, const Block& block);
+    bool readBlock(const PhysicalAddress& addr, Block& block);
+   
+     // @brief Constructor
+    
     DiskManager(const std::string& disk_path = "./disk_simulation") 
         : filesystem(disk_path)
         , next_free_address(0, 0, 0, 0)
@@ -435,7 +444,7 @@ private:
     /**
      * @brief Simula el tiempo de acceso a disco
      */
-    double simulateAccessTime(const PhysicalAddress& addr) {
+    double simulateAccessTime(const PhysicalAddress&) {
         // Simular seek time, rotational latency y transfer time
         static std::random_device rd;
         static std::mt19937 gen(rd());
