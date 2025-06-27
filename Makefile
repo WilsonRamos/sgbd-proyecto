@@ -25,7 +25,14 @@ HEADERS = $(INCLUDE_DIR)/PhysicalAddress.h \
           $(INCLUDE_DIR)/Record.h \
           $(INCLUDE_DIR)/Block.h \
           $(INCLUDE_DIR)/FileSystemSimulator.h \
-          $(INCLUDE_DIR)/DiskManager.h
+          $(INCLUDE_DIR)/DiskManager.h \
+          $(INCLUDE_DIR)/DiskManagerExtended.h \
+          $(INCLUDE_DIR)/buffer/PageDirectory.h \
+          $(INCLUDE_DIR)/buffer/PageTable.h \
+          $(INCLUDE_DIR)/buffer/LRUReplacer.h \
+          $(INCLUDE_DIR)/buffer/ClockReplacer.h \
+          $(INCLUDE_DIR)/buffer/BufferPoolManager.h \
+          $(INCLUDE_DIR)/buffer/BufferManagerClock.h
 
 # Detectar sistema operativo
 UNAME_S := $(shell uname -s)

@@ -6,6 +6,8 @@
 #include <map>
 #include "../include/DiskManagerExtended.h"
 #include "../include/buffer/BufferPoolManager.h"
+#include "../include/buffer/ClockReplacer.h"
+#include "../include/buffer/BufferManagerClock.h"
 
 /**
  * @brief Estado del sistema actualizado con Buffer Pool
@@ -35,6 +37,7 @@ class SGBDSystemExtended {
 private:
     std::unique_ptr<DiskManagerExtended> disk_manager;
     std::unique_ptr<BufferPoolManager> buffer_manager;
+    std::unique_ptr<BufferManagerClock> clock_buffer_manager; 
     SystemState current_state;
     std::string disk_path;
     size_t buffer_pool_size;
@@ -140,6 +143,403 @@ public:
             return false;
         }
     }
+
+
+    void initializeClockBufferPool() {
+        if (current_state < SystemState::DISK_READY) {
+            std::cout << "❌ Error: Primero inicializa el disco (opción 1)" << std::endl;
+            return;
+        }
+        
+        size_t clock_pool_size;
+        std::cout << "\n🕐 INICIALIZACIÓN BUFFER MANAGER CLOCK" << std::endl;
+        std::cout << "Tamaño del Clock Buffer Pool (frames): ";
+        std::cin >> clock_pool_size;
+        
+        if (clock_pool_size < 2 || clock_pool_size > 20) {
+            std::cout << "⚠️  Tamaño recomendado: 2-20 frames. Usando 4." << std::endl;
+            clock_pool_size = 4;
+        }
+        
+        try {
+            clock_buffer_manager = std::make_unique<BufferManagerClock>(
+                clock_pool_size, disk_manager.get());
+            
+            std::cout << "\n✅ Clock Buffer Manager inicializado exitosamente!" << std::endl;
+            std::cout << "🕐 Algoritmo Clock activo con " << clock_pool_size << " frames" << std::endl;
+            std::cout << "⚡ Optimizado contra sequential flooding" << std::endl;
+            
+        } catch (const std::exception& e) {
+            std::cout << "❌ Error inicializando Clock Buffer Manager: " << e.what() << std::endl;
+        }
+    }
+    
+    /**
+     * @brief Operaciones básicas con Clock Buffer Manager
+     */
+    void testClockBufferOperations() {
+        if (!clock_buffer_manager) {
+            std::cout << "❌ Error: Primero inicializa Clock Buffer Manager (opción 25)" << std::endl;
+            return;
+        }
+        
+        std::cout << "\n🧪 PRUEBAS CLOCK BUFFER OPERATIONS" << std::endl;
+        std::cout << "=== Test de comportamiento Clock vs LRU ===" << std::endl;
+        
+        // Test 1: Cargar páginas secuencialmente
+        std::cout << "\n📖 Test 1: Cargando páginas secuencialmente..." << std::endl;
+        std::vector<int> test_pages = {1, 2, 3, 4, 5, 6};
+        
+        for (int page_id : test_pages) {
+            std::cout << "\n--- Accediendo página " << page_id << " ---" << std::endl;
+            
+            // Crear página si no existe
+            int new_page_id;
+            auto block = clock_buffer_manager->newPage(new_page_id);
+            if (block) {
+                std::cout << "✅ Nueva página " << new_page_id << " creada" << std::endl;
+                clock_buffer_manager->unpinPage(new_page_id, false);
+            }
+            
+            clock_buffer_manager->displayCompactState();
+        }
+        
+        // Test 2: Acceso repetido a páginas (probar reference bits)
+        std::cout << "\n🔄 Test 2: Re-accediendo páginas para probar reference bits..." << std::endl;
+        std::vector<int> existing_pages;
+        
+        // Crear algunas páginas para el test
+        for (int i = 0; i < 3; ++i) {
+            int new_page_id;
+            auto block = clock_buffer_manager->newPage(new_page_id);
+            if (block) {
+                existing_pages.push_back(new_page_id);
+                clock_buffer_manager->unpinPage(new_page_id, false);
+            }
+        }
+        
+        // Re-acceder páginas existentes
+        for (int page_id : existing_pages) {
+            std::cout << "\n--- Re-accediendo página " << page_id << " ---" << std::endl;
+            auto block = clock_buffer_manager->fetchPage(page_id);
+            if (block) {
+                clock_buffer_manager->unpinPage(page_id, false);
+            }
+            clock_buffer_manager->displayCompactState();
+        }
+        
+        std::cout << "\n✅ Tests Clock completados!" << std::endl;
+    }
+    
+    /**
+     * @brief Demuestra las diferencias entre Clock y LRU
+     */
+    void demonstrateClockVsLRU() {
+        if (!clock_buffer_manager) {
+            std::cout << "❌ Error: Primero inicializa Clock Buffer Manager (opción 25)" << std::endl;
+            return;
+        }
+        
+        std::cout << "\n⚔️  DEMOSTRACIÓN: CLOCK vs LRU" << std::endl;
+        std::cout << "=== Escenario: Sequential Flooding ===" << std::endl;
+        
+        std::cout << "\n🎯 Clock Algorithm ventajas:" << std::endl;
+        std::cout << "   ✅ Menor overhead (no timestamps)" << std::endl;
+        std::cout << "   ✅ Resistente a sequential flooding" << std::endl;
+        std::cout << "   ✅ Aproximación eficiente de LRU" << std::endl;
+        std::cout << "   ✅ Reference bits dan segunda oportunidad" << std::endl;
+        
+        // Simular patrón problemático para LRU
+        std::cout << "\n📖 Simulando patrón que afecta LRU:" << std::endl;
+        std::cout << "   Páginas frecuentes: Se crearán dinámicamente" << std::endl;
+        std::cout << "   Sequential scan: Nuevas páginas (patrones únicos)" << std::endl;
+        
+        // Establecer páginas "frecuentes"
+        std::vector<int> frequent_pages;
+        for (int i = 0; i < 3; ++i) {
+            int page_id;
+            auto block = clock_buffer_manager->newPage(page_id);
+            if (block) {
+                frequent_pages.push_back(page_id);
+                clock_buffer_manager->unpinPage(page_id, false);
+                std::cout << "📌 Página frecuente " << page_id << " creada" << std::endl;
+            }
+        }
+        
+        std::cout << "\n🕐 Estado inicial:" << std::endl;
+        clock_buffer_manager->displayCompactState();
+        
+        // Sequential scan que debería NO afectar páginas frecuentes
+        std::cout << "\n🌊 Iniciando sequential scan (5 páginas nuevas):" << std::endl;
+        std::vector<int> scan_pages;
+        for (int i = 0; i < 5; ++i) {
+            int page_id;
+            auto block = clock_buffer_manager->newPage(page_id);
+            if (block) {
+                scan_pages.push_back(page_id);
+                std::cout << "\n--- Scan página " << page_id << " ---" << std::endl;
+                clock_buffer_manager->unpinPage(page_id, false);
+                clock_buffer_manager->displayCompactState();
+            }
+        }
+        
+        // Verificar si páginas frecuentes sobrevivieron
+        std::cout << "\n🔍 Verificando supervivencia de páginas frecuentes:" << std::endl;
+        for (int page_id : frequent_pages) {
+            auto block = clock_buffer_manager->fetchPage(page_id);
+            if (block) {
+                std::cout << "✅ Página frecuente " << page_id << " sobrevivió!" << std::endl;
+                clock_buffer_manager->unpinPage(page_id, false);
+            } else {
+                std::cout << "❌ Página frecuente " << page_id << " fue evictada" << std::endl;
+            }
+        }
+        
+        std::cout << "\n🏆 Clock Algorithm demostrado!" << std::endl;
+    }
+    
+    /**
+     * @brief Operaciones avanzadas con páginas en Clock
+     */
+    void clockAdvancedPageOperations() {
+        if (!clock_buffer_manager) {
+            std::cout << "❌ Error: Primero inicializa Clock Buffer Manager (opción 25)" << std::endl;
+            return;
+        }
+        
+        std::cout << "\n🔧 OPERACIONES AVANZADAS CLOCK" << std::endl;
+        
+        int option;
+        do {
+            std::cout << "\n--- Operaciones Disponibles ---" << std::endl;
+            std::cout << "1. Fetch página específica" << std::endl;
+            std::cout << "2. Crear nueva página" << std::endl;
+            std::cout << "3. Flush página específica" << std::endl;
+            std::cout << "4. Delete página específica" << std::endl;
+            std::cout << "5. Mostrar estado del Clock" << std::endl;
+            std::cout << "6. Estadísticas detalladas" << std::endl;
+            std::cout << "0. Volver al menú principal" << std::endl;
+            std::cout << "Opción: ";
+            std::cin >> option;
+            
+            switch (option) {
+                case 1: {
+                    int page_id;
+                    std::cout << "ID de página a fetch: ";
+                    std::cin >> page_id;
+                    
+                    auto block = clock_buffer_manager->fetchPage(page_id);
+                    if (block) {
+                        std::cout << "✅ Página " << page_id << " obtenida" << std::endl;
+                        
+                        char dirty_choice;
+                        std::cout << "¿Marcar como dirty? (y/n): ";
+                        std::cin >> dirty_choice;
+                        
+                        clock_buffer_manager->unpinPage(page_id, dirty_choice == 'y');
+                    }
+                    break;
+                }
+                
+                case 2: {
+                    int new_page_id;
+                    auto block = clock_buffer_manager->newPage(new_page_id);
+                    if (block) {
+                        std::cout << "✅ Nueva página " << new_page_id << " creada" << std::endl;
+                        clock_buffer_manager->unpinPage(new_page_id, true);
+                    }
+                    break;
+                }
+                
+                case 3: {
+                    int page_id;
+                    std::cout << "ID de página a flush: ";
+                    std::cin >> page_id;
+                    
+                    if (clock_buffer_manager->flushPage(page_id)) {
+                        std::cout << "✅ Página " << page_id << " flushed" << std::endl;
+                    } else {
+                        std::cout << "❌ Error flushing página " << page_id << std::endl;
+                    }
+                    break;
+                }
+                
+                case 4: {
+                    int page_id;
+                    std::cout << "ID de página a eliminar: ";
+                    std::cin >> page_id;
+                    
+                    if (clock_buffer_manager->deletePage(page_id)) {
+                        std::cout << "✅ Página " << page_id << " eliminada" << std::endl;
+                    } else {
+                        std::cout << "❌ Error eliminando página " << page_id << std::endl;
+                    }
+                    break;
+                }
+                
+                case 5:
+                    clock_buffer_manager->displayClockState();
+                    break;
+                    
+                case 6:
+                    clock_buffer_manager->displayStatistics();
+                    break;
+                    
+                case 0:
+                    break;
+                    
+                default:
+                    std::cout << "❌ Opción no válida" << std::endl;
+                    break;
+            }
+            
+            if (option != 0) {
+                std::cout << "\nPresiona Enter para continuar...";
+                std::cin.ignore();
+                std::cin.get();
+            }
+            
+        } while (option != 0);
+    }
+    
+    /**
+     * @brief Muestra el estado completo del Clock Buffer Manager
+     */
+    void showClockBufferStatus() {
+        if (!clock_buffer_manager) {
+            std::cout << "❌ Clock Buffer Manager no inicializado" << std::endl;
+            return;
+        }
+        
+        std::cout << "\n🕐 ESTADO COMPLETO CLOCK BUFFER MANAGER" << std::endl;
+        clock_buffer_manager->displayStatistics();
+        clock_buffer_manager->displayClockState();
+    }
+    
+    /**
+     * @brief Flush todas las páginas del Clock Buffer Manager
+     */
+    void flushAllClockPages() {
+        if (!clock_buffer_manager) {
+            std::cout << "❌ Clock Buffer Manager no inicializado" << std::endl;
+            return;
+        }
+        
+        std::cout << "\n💾 Flushing todas las páginas Clock..." << std::endl;
+        clock_buffer_manager->flushAllDirtyPages();
+        std::cout << "✅ Flush completo!" << std::endl;
+    }
+    
+    /**
+     * @brief Compara rendimiento Clock vs LRU
+     */
+    void compareClockVsLRUPerformance() {
+        if (!buffer_manager || !clock_buffer_manager) {
+            std::cout << "❌ Error: Necesitas ambos buffer managers inicializados" << std::endl;
+            std::cout << "   - Opción 18: BufferPoolManager (LRU)" << std::endl;
+            std::cout << "   - Opción 25: BufferManagerClock" << std::endl;
+            return;
+        }
+        
+        std::cout << "\n⚔️  COMPARACIÓN RENDIMIENTO: CLOCK vs LRU" << std::endl;
+        std::cout << "=== Análisis de estadísticas actuales ===" << std::endl;
+        
+        // Mostrar estadísticas LRU
+        std::cout << "\n📊 ESTADÍSTICAS LRU BUFFER MANAGER:" << std::endl;
+        showBufferPoolStatus();
+        
+        // Mostrar estadísticas Clock
+        std::cout << "\n📊 ESTADÍSTICAS CLOCK BUFFER MANAGER:" << std::endl;
+        clock_buffer_manager->displayStatistics();
+        
+        std::cout << "\n🎯 CONCLUSIONES:" << std::endl;
+        std::cout << "📈 Ventajas Clock:" << std::endl;
+        std::cout << "   • Menor overhead de memoria (no timestamps)" << std::endl;
+        std::cout << "   • Resistente a sequential flooding" << std::endl;
+        std::cout << "   • Algoritmo más simple y eficiente" << std::endl;
+        std::cout << "   • Reference bits dan segunda oportunidad" << std::endl;
+        
+        std::cout << "\n📈 Ventajas LRU:" << std::endl;
+        std::cout << "   • Política de reemplazo más precisa" << std::endl;
+        std::cout << "   • Mejor para workloads con localidad temporal fuerte" << std::endl;
+        std::cout << "   • Comportamiento más predecible" << std::endl;
+        std::cout << "   • Información temporal más granular" << std::endl;
+    }
+    
+    /**
+     * @brief Test intensivo Clock vs Sequential Flooding
+     */
+    void intensiveClockSequentialTest() {
+        if (!clock_buffer_manager) {
+            std::cout << "❌ Error: Primero inicializa Clock Buffer Manager (opción 25)" << std::endl;
+            return;
+        }
+        
+        std::cout << "\n🌊 TEST INTENSIVO: SEQUENTIAL FLOODING" << std::endl;
+        std::cout << "=== Evaluando resistencia del Clock Algorithm ===" << std::endl;
+        
+        // Crear páginas de trabajo frecuentes
+        std::vector<int> working_set;
+        for (int i = 0; i < 2; ++i) {
+            int page_id;
+            auto block = clock_buffer_manager->newPage(page_id);
+            if (block) {
+                working_set.push_back(page_id);
+                clock_buffer_manager->unpinPage(page_id, false);
+                std::cout << "🏠 Working set página " << page_id << " creada" << std::endl;
+            }
+        }
+        
+        // Acceder múltiples veces a working set para establecer reference bits
+        for (int round = 0; round < 3; ++round) {
+            for (int page_id : working_set) {
+                auto block = clock_buffer_manager->fetchPage(page_id);
+                if (block) {
+                    clock_buffer_manager->unpinPage(page_id, false);
+                }
+            }
+        }
+        
+        std::cout << "\n📊 Working set establecido:" << std::endl;
+        clock_buffer_manager->displayCompactState();
+        
+        // Sequential flooding intensivo
+        std::cout << "\n🌊 Iniciando sequential flooding (10 páginas):" << std::endl;
+        for (int i = 0; i < 10; ++i) {
+            int page_id;
+            auto block = clock_buffer_manager->newPage(page_id);
+            if (block) {
+                std::cout << "⚡ Flood página " << page_id << " - ";
+                clock_buffer_manager->unpinPage(page_id, false);
+                clock_buffer_manager->displayCompactState();
+            }
+        }
+        
+        // Verificar supervivencia del working set
+        std::cout << "\n🔍 RESULTADOS DEL TEST:" << std::endl;
+        int survived = 0;
+        for (int page_id : working_set) {
+            auto block = clock_buffer_manager->fetchPage(page_id);
+            if (block) {
+                survived++;
+                std::cout << "✅ Working set página " << page_id << " SOBREVIVIÓ" << std::endl;
+                clock_buffer_manager->unpinPage(page_id, false);
+            } else {
+                std::cout << "❌ Working set página " << page_id << " fue evictada" << std::endl;
+            }
+        }
+        
+        std::cout << "\n🏆 RESULTADO FINAL:" << std::endl;
+        std::cout << "   Working set supervivencia: " << survived << "/" << working_set.size() << std::endl;
+        std::cout << "   Porcentaje: " << (100.0 * survived / working_set.size()) << "%" << std::endl;
+        
+        if (survived > 0) {
+            std::cout << "✅ Clock Algorithm demostró resistencia a sequential flooding!" << std::endl;
+        } else {
+            std::cout << "⚠️  Working set completamente evictado - aumentar buffer size" << std::endl;
+        }
+    }
+};
     
     bool initializeBufferPool() {
         if (current_state != SystemState::DISK_READY) {
@@ -915,6 +1315,15 @@ void showMenu() {
     std::cout << "\n📈 INFORMACION DEL SISTEMA:" << std::endl;
     std::cout << "16. Mostrar estadísticas integradas" << std::endl;
     std::cout << "17. Mostrar estructura de directorios" << std::endl;
+
+    std::cout << "\n🕐 CLOCK BUFFER MANAGER:" << std::endl;
+    std::cout << "25. Inicializar Clock Buffer Manager" << std::endl;
+    std::cout << "26. Test operaciones Clock básicas" << std::endl;
+    std::cout << "27. Demostrar Clock vs LRU" << std::endl;
+    std::cout << "28. Operaciones avanzadas Clock" << std::endl;
+    std::cout << "29. Estado Clock Buffer Manager" << std::endl;
+    std::cout << "30. Flush páginas Clock" << std::endl;
+    std::cout << "31. Comparar rendimiento Clock vs LRU" << std::endl;
     
     std::cout << "\n0.  Salir" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
@@ -1057,6 +1466,35 @@ int main() {
             case 24:
                 sistema.showPageDirectory();
                 break;
+
+            case 25:
+                sistema.initializeClockBufferPool();
+                break;
+    
+            case 26:
+                sistema.testClockBufferOperations();
+                break;
+    
+            case 27:
+                sistema.demonstrateClockVsLRU();
+                break;
+    
+            case 28:
+                sistema.clockAdvancedPageOperations();
+                break;
+    
+            case 29:
+                sistema.showClockBufferStatus();
+                break;
+    
+            case 30:
+                sistema.flushAllClockPages();
+                break;
+    
+            case 31:
+                sistema.compareClockVsLRUPerformance();
+                break;
+
                 
             case 0:
                 std::cout << "\n🎓 ¡Gracias por usar el SGBD Físico Integrado!" << std::endl;
