@@ -31,7 +31,7 @@ struct DatasetSchema {
 };
 
 /**
- * @brief Clase principal del sistema con Buffer Pool Management
+ * @brief Clase principal del sistema con Buffer Pool Management - COMPLETAMENTE REORGANIZADA
  */
 class SGBDSystemExtended {
 private:
@@ -144,7 +144,54 @@ public:
         }
     }
 
+    // ========== BUFFER POOL MANAGEMENT ==========
+    
+    bool initializeBufferPool() {
+        if (current_state != SystemState::DISK_READY) {
+            std::cout << "\n❌ ERROR: Requiere disco inicializado primero." << std::endl;
+            return false;
+        }
+        
+        std::cout << "\n=== INICIALIZACION DEL BUFFER POOL ===" << std::endl;
+        
+        std::string input;
+        std::cout << "Tamaño del buffer pool (frames) [" << buffer_pool_size << "]: ";
+        std::getline(std::cin, input);
+        
+        if (!input.empty()) {
+            try {
+                size_t new_size = std::stoull(input);
+                if (new_size > 0 && new_size <= 64) {
+                    buffer_pool_size = new_size;
+                } else {
+                    std::cout << "⚠️  Tamaño inválido, usando por defecto: " << buffer_pool_size << std::endl;
+                }
+            } catch (const std::exception&) {
+                std::cout << "⚠️  Entrada inválida, usando por defecto: " << buffer_pool_size << std::endl;
+            }
+        }
+        
+        try {
+            buffer_manager = std::make_unique<BufferPoolManager>(buffer_pool_size, disk_manager.get());
+            current_state = SystemState::BUFFER_POOL_READY;
+            
+            std::cout << "\n🚀 Buffer Pool Manager inicializado exitosamente!" << std::endl;
+            std::cout << "   - Pool size: " << buffer_pool_size << " frames" << std::endl;
+            std::cout << "   - Page Table: ✓ (En memoria)" << std::endl;
+            std::cout << "   - Page Directory: ✓ (Gestionado por DiskManager)" << std::endl;
+            std::cout << "   - LRU Replacer: ✓" << std::endl;
+            std::cout << "🎯 Sistema completo listo para operaciones avanzadas!" << std::endl;
+            
+            return true;
+        } catch (const std::exception& e) {
+            std::cout << "❌ Error inicializando Buffer Pool: " << e.what() << std::endl;
+            current_state = SystemState::ERROR_STATE;
+            return false;
+        }
+    }
 
+    // ========== CLOCK BUFFER MANAGEMENT ==========
+    
     void initializeClockBufferPool() {
         if (current_state < SystemState::DISK_READY) {
             std::cout << "❌ Error: Primero inicializa el disco (opción 1)" << std::endl;
@@ -174,9 +221,6 @@ public:
         }
     }
     
-    /**
-     * @brief Operaciones básicas con Clock Buffer Manager
-     */
     void testClockBufferOperations() {
         if (!clock_buffer_manager) {
             std::cout << "❌ Error: Primero inicializa Clock Buffer Manager (opción 25)" << std::endl;
@@ -188,12 +232,10 @@ public:
         
         // Test 1: Cargar páginas secuencialmente
         std::cout << "\n📖 Test 1: Cargando páginas secuencialmente..." << std::endl;
-        std::vector<int> test_pages = {1, 2, 3, 4, 5, 6};
         
-        for (int page_id : test_pages) {
-            std::cout << "\n--- Accediendo página " << page_id << " ---" << std::endl;
+        for (int i = 0; i < 6; ++i) {
+            std::cout << "\n--- Creando página " << (i+1) << " ---" << std::endl;
             
-            // Crear página si no existe
             int new_page_id;
             auto block = clock_buffer_manager->newPage(new_page_id);
             if (block) {
@@ -204,36 +246,9 @@ public:
             clock_buffer_manager->displayCompactState();
         }
         
-        // Test 2: Acceso repetido a páginas (probar reference bits)
-        std::cout << "\n🔄 Test 2: Re-accediendo páginas para probar reference bits..." << std::endl;
-        std::vector<int> existing_pages;
-        
-        // Crear algunas páginas para el test
-        for (int i = 0; i < 3; ++i) {
-            int new_page_id;
-            auto block = clock_buffer_manager->newPage(new_page_id);
-            if (block) {
-                existing_pages.push_back(new_page_id);
-                clock_buffer_manager->unpinPage(new_page_id, false);
-            }
-        }
-        
-        // Re-acceder páginas existentes
-        for (int page_id : existing_pages) {
-            std::cout << "\n--- Re-accediendo página " << page_id << " ---" << std::endl;
-            auto block = clock_buffer_manager->fetchPage(page_id);
-            if (block) {
-                clock_buffer_manager->unpinPage(page_id, false);
-            }
-            clock_buffer_manager->displayCompactState();
-        }
-        
         std::cout << "\n✅ Tests Clock completados!" << std::endl;
     }
     
-    /**
-     * @brief Demuestra las diferencias entre Clock y LRU
-     */
     void demonstrateClockVsLRU() {
         if (!clock_buffer_manager) {
             std::cout << "❌ Error: Primero inicializa Clock Buffer Manager (opción 25)" << std::endl;
@@ -249,14 +264,9 @@ public:
         std::cout << "   ✅ Aproximación eficiente de LRU" << std::endl;
         std::cout << "   ✅ Reference bits dan segunda oportunidad" << std::endl;
         
-        // Simular patrón problemático para LRU
-        std::cout << "\n📖 Simulando patrón que afecta LRU:" << std::endl;
-        std::cout << "   Páginas frecuentes: Se crearán dinámicamente" << std::endl;
-        std::cout << "   Sequential scan: Nuevas páginas (patrones únicos)" << std::endl;
-        
-        // Establecer páginas "frecuentes"
+        // Crear páginas frecuentes
         std::vector<int> frequent_pages;
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 2; ++i) {
             int page_id;
             auto block = clock_buffer_manager->newPage(page_id);
             if (block) {
@@ -269,21 +279,19 @@ public:
         std::cout << "\n🕐 Estado inicial:" << std::endl;
         clock_buffer_manager->displayCompactState();
         
-        // Sequential scan que debería NO afectar páginas frecuentes
+        // Sequential scan
         std::cout << "\n🌊 Iniciando sequential scan (5 páginas nuevas):" << std::endl;
-        std::vector<int> scan_pages;
         for (int i = 0; i < 5; ++i) {
             int page_id;
             auto block = clock_buffer_manager->newPage(page_id);
             if (block) {
-                scan_pages.push_back(page_id);
                 std::cout << "\n--- Scan página " << page_id << " ---" << std::endl;
                 clock_buffer_manager->unpinPage(page_id, false);
                 clock_buffer_manager->displayCompactState();
             }
         }
         
-        // Verificar si páginas frecuentes sobrevivieron
+        // Verificar supervivencia
         std::cout << "\n🔍 Verificando supervivencia de páginas frecuentes:" << std::endl;
         for (int page_id : frequent_pages) {
             auto block = clock_buffer_manager->fetchPage(page_id);
@@ -298,9 +306,6 @@ public:
         std::cout << "\n🏆 Clock Algorithm demostrado!" << std::endl;
     }
     
-    /**
-     * @brief Operaciones avanzadas con páginas en Clock
-     */
     void clockAdvancedPageOperations() {
         if (!clock_buffer_manager) {
             std::cout << "❌ Error: Primero inicializa Clock Buffer Manager (opción 25)" << std::endl;
@@ -402,9 +407,6 @@ public:
         } while (option != 0);
     }
     
-    /**
-     * @brief Muestra el estado completo del Clock Buffer Manager
-     */
     void showClockBufferStatus() {
         if (!clock_buffer_manager) {
             std::cout << "❌ Clock Buffer Manager no inicializado" << std::endl;
@@ -416,9 +418,6 @@ public:
         clock_buffer_manager->displayClockState();
     }
     
-    /**
-     * @brief Flush todas las páginas del Clock Buffer Manager
-     */
     void flushAllClockPages() {
         if (!clock_buffer_manager) {
             std::cout << "❌ Clock Buffer Manager no inicializado" << std::endl;
@@ -430,9 +429,6 @@ public:
         std::cout << "✅ Flush completo!" << std::endl;
     }
     
-    /**
-     * @brief Compara rendimiento Clock vs LRU
-     */
     void compareClockVsLRUPerformance() {
         if (!buffer_manager || !clock_buffer_manager) {
             std::cout << "❌ Error: Necesitas ambos buffer managers inicializados" << std::endl;
@@ -465,125 +461,8 @@ public:
         std::cout << "   • Comportamiento más predecible" << std::endl;
         std::cout << "   • Información temporal más granular" << std::endl;
     }
-    
-    /**
-     * @brief Test intensivo Clock vs Sequential Flooding
-     */
-    void intensiveClockSequentialTest() {
-        if (!clock_buffer_manager) {
-            std::cout << "❌ Error: Primero inicializa Clock Buffer Manager (opción 25)" << std::endl;
-            return;
-        }
-        
-        std::cout << "\n🌊 TEST INTENSIVO: SEQUENTIAL FLOODING" << std::endl;
-        std::cout << "=== Evaluando resistencia del Clock Algorithm ===" << std::endl;
-        
-        // Crear páginas de trabajo frecuentes
-        std::vector<int> working_set;
-        for (int i = 0; i < 2; ++i) {
-            int page_id;
-            auto block = clock_buffer_manager->newPage(page_id);
-            if (block) {
-                working_set.push_back(page_id);
-                clock_buffer_manager->unpinPage(page_id, false);
-                std::cout << "🏠 Working set página " << page_id << " creada" << std::endl;
-            }
-        }
-        
-        // Acceder múltiples veces a working set para establecer reference bits
-        for (int round = 0; round < 3; ++round) {
-            for (int page_id : working_set) {
-                auto block = clock_buffer_manager->fetchPage(page_id);
-                if (block) {
-                    clock_buffer_manager->unpinPage(page_id, false);
-                }
-            }
-        }
-        
-        std::cout << "\n📊 Working set establecido:" << std::endl;
-        clock_buffer_manager->displayCompactState();
-        
-        // Sequential flooding intensivo
-        std::cout << "\n🌊 Iniciando sequential flooding (10 páginas):" << std::endl;
-        for (int i = 0; i < 10; ++i) {
-            int page_id;
-            auto block = clock_buffer_manager->newPage(page_id);
-            if (block) {
-                std::cout << "⚡ Flood página " << page_id << " - ";
-                clock_buffer_manager->unpinPage(page_id, false);
-                clock_buffer_manager->displayCompactState();
-            }
-        }
-        
-        // Verificar supervivencia del working set
-        std::cout << "\n🔍 RESULTADOS DEL TEST:" << std::endl;
-        int survived = 0;
-        for (int page_id : working_set) {
-            auto block = clock_buffer_manager->fetchPage(page_id);
-            if (block) {
-                survived++;
-                std::cout << "✅ Working set página " << page_id << " SOBREVIVIÓ" << std::endl;
-                clock_buffer_manager->unpinPage(page_id, false);
-            } else {
-                std::cout << "❌ Working set página " << page_id << " fue evictada" << std::endl;
-            }
-        }
-        
-        std::cout << "\n🏆 RESULTADO FINAL:" << std::endl;
-        std::cout << "   Working set supervivencia: " << survived << "/" << working_set.size() << std::endl;
-        std::cout << "   Porcentaje: " << (100.0 * survived / working_set.size()) << "%" << std::endl;
-        
-        if (survived > 0) {
-            std::cout << "✅ Clock Algorithm demostró resistencia a sequential flooding!" << std::endl;
-        } else {
-            std::cout << "⚠️  Working set completamente evictado - aumentar buffer size" << std::endl;
-        }
-    }
-};
-    
-    bool initializeBufferPool() {
-        if (current_state != SystemState::DISK_READY) {
-            std::cout << "\n❌ ERROR: Requiere disco inicializado primero." << std::endl;
-            return false;
-        }
-        
-        std::cout << "\n=== INICIALIZACION DEL BUFFER POOL ===" << std::endl;
-        
-        std::string input;
-        std::cout << "Tamaño del buffer pool (frames) [" << buffer_pool_size << "]: ";
-        std::getline(std::cin, input);
-        
-        if (!input.empty()) {
-            try {
-                size_t new_size = std::stoull(input);
-                if (new_size > 0 && new_size <= 64) {
-                    buffer_pool_size = new_size;
-                } else {
-                    std::cout << "⚠️  Tamaño inválido, usando por defecto: " << buffer_pool_size << std::endl;
-                }
-            } catch (const std::exception&) {
-                std::cout << "⚠️  Entrada inválida, usando por defecto: " << buffer_pool_size << std::endl;
-            }
-        }
-        
-        try {
-            buffer_manager = std::make_unique<BufferPoolManager>(buffer_pool_size, disk_manager.get());
-            current_state = SystemState::BUFFER_POOL_READY;
-            
-            std::cout << "\n🚀 Buffer Pool Manager inicializado exitosamente!" << std::endl;
-            std::cout << "   - Pool size: " << buffer_pool_size << " frames" << std::endl;
-            std::cout << "   - Page Table: ✓ (En memoria)" << std::endl;
-            std::cout << "   - Page Directory: ✓ (Gestionado por DiskManager)" << std::endl;
-            std::cout << "   - LRU Replacer: ✓" << std::endl;
-            std::cout << "🎯 Sistema completo listo para operaciones avanzadas!" << std::endl;
-            
-            return true;
-        } catch (const std::exception& e) {
-            std::cout << "❌ Error inicializando Buffer Pool: " << e.what() << std::endl;
-            current_state = SystemState::ERROR_STATE;
-            return false;
-        }
-    }
+
+    // ========== HELPER METHODS ==========
     
     void showDiskStructure(const DiskConfig& config) {
         std::cout << "\n=== ESTRUCTURA DEL DISCO EXTENDIDO ===" << std::endl;
@@ -636,32 +515,26 @@ public:
         }
         return true;
     }
-    
-    // ========== NUEVAS OPERACIONES CON BUFFER POOL ==========
+
+    // ========== BUFFER POOL OPERATIONS ==========
     
     void testBufferPoolOperations() {
         if (!requiresBufferPool()) return;
         
         std::cout << "\n=== DEMO DE OPERACIONES DEL BUFFER POOL ===" << std::endl;
         
-        // Solicitar páginas para demostrar funcionamiento
-        std::vector<int> test_pages = {1, 2, 3, 4, 5}; // Más páginas que frames para forzar evicción
+        // Crear páginas para demostrar funcionamiento
+        std::vector<int> test_pages;
         
-        std::cout << "\n🔍 Solicitando páginas secuencialmente..." << std::endl;
+        std::cout << "\n🔍 Creando páginas secuencialmente..." << std::endl;
         
-        for (int page_id : test_pages) {
-            std::cout << "\n--- Solicitando página " << page_id << " ---" << std::endl;
-            
-            auto block = buffer_manager->requestPage(page_id, PageOperation::READ);
-            if (block) {
-                std::cout << "✅ Página " << page_id << " cargada exitosamente" << std::endl;
-                buffer_manager->unpinPage(page_id);
-            } else {
-                std::cout << "❌ Error cargando página " << page_id << std::endl;
+        for (int i = 0; i < 5; ++i) {
+            int new_page_id = buffer_manager->createNewPage();
+            if (new_page_id != -1) {
+                test_pages.push_back(new_page_id);
+                std::cout << "✅ Página " << new_page_id << " creada" << std::endl;
+                buffer_manager->unpinPage(new_page_id, false);
             }
-            
-            // Mostrar estado después de cada operación
-            buffer_manager->displayCompactStatus();
         }
         
         std::cout << "\n📊 Estado final del Buffer Pool:" << std::endl;
@@ -699,7 +572,6 @@ public:
             std::cout << "📄 Información del bloque:" << std::endl;
             block->displayInfo();
             
-            // Preguntar si desea hacer unpin
             std::cout << "\n¿Liberar página (unpin)? (s/n): ";
             std::getline(std::cin, input);
             
@@ -711,8 +583,6 @@ public:
         } else {
             std::cout << "❌ Error cargando página" << std::endl;
         }
-        
-        buffer_manager->displayCompactStatus();
     }
     
     void createNewPageBuffered() {
@@ -724,15 +594,10 @@ public:
         if (new_page_id != -1) {
             std::cout << "\n✨ Nueva página creada con ID: " << new_page_id << std::endl;
             
-            // Mostrar información del Page Directory
             std::cout << "\n📁 Page Directory actualizado:" << std::endl;
             disk_manager->displayPageDirectory();
             
-            // Mostrar estado del buffer pool
-            buffer_manager->displayCompactStatus();
-            
-            // Liberar la página
-            buffer_manager->unpinPage(new_page_id, true); // true = dirty
+            buffer_manager->unpinPage(new_page_id, true);
         } else {
             std::cout << "❌ Error creando nueva página" << std::endl;
         }
@@ -759,45 +624,8 @@ public:
         buffer_manager->flushAllPages();
         std::cout << "✅ Todas las páginas dirty han sido escritas a disco" << std::endl;
     }
-    
-    // ========== OPERACIONES EXISTENTES MEJORADAS ==========
-    
-    void insertSingleRecord() {
-        if (!requiresDisk()) return;
-        
-        std::cout << "\n=== INSERCION DETALLADA DE REGISTRO ===" << std::endl;
-        
-        std::string table_name;
-        std::cout << "Nombre de la tabla: ";
-        std::getline(std::cin, table_name);
-        
-        std::cout << "Valores separados por comas: ";
-        std::string values_str;
-        std::getline(std::cin, values_str);
-        
-        std::vector<std::string> values = parseCSVLine(values_str);
-        
-        std::cout << "\n🔄 PROCESO DE INSERCION CON PAGE DIRECTORY:" << std::endl;
-        std::cout << "1. Datos del registro:" << std::endl;
-        std::cout << "   - Tabla: " << table_name << std::endl;
-        std::cout << "   - Campos: " << values.size() << std::endl;
-        std::cout << "   - Tamaño estimado: " << estimateRecordSize(values) << " bytes" << std::endl;
-        
-        std::cout << "2. DiskManager gestionará automáticamente:" << std::endl;
-        std::cout << "   - Asignación de bloque" << std::endl;
-        std::cout << "   - Registro en Page Directory" << std::endl;
-        std::cout << "   - Persistencia de metadatos" << std::endl;
-        
-        if (disk_manager->insertRecord(table_name, values)) {
-            std::cout << "\n✅ Registro insertado exitosamente." << std::endl;
-            
-            // Mostrar Page Directory actualizado
-            std::cout << "\n📁 Page Directory actualizado:" << std::endl;
-            disk_manager->displayPageDirectory();
-        } else {
-            std::cout << "\n❌ Error insertando el registro." << std::endl;
-        }
-    }
+
+    // ========== TABLE OPERATIONS ==========
     
     void createTable() {
         if (!requiresDisk()) return;
@@ -846,7 +674,6 @@ public:
             std::cout << "\n✅ Tabla '" << table_name << "' creada." << std::endl;
             std::cout << "Tipo: " << (use_fixed ? "Longitud Fija" : "Longitud Variable") << std::endl;
             
-            // Mostrar Page Directory actualizado
             std::cout << "\n📁 Page Directory actualizado automáticamente:" << std::endl;
             disk_manager->displayPageDirectory();
         } else {
@@ -854,7 +681,36 @@ public:
         }
     }
     
-    // ========== OPERACIONES HEREDADAS ==========
+    void insertSingleRecord() {
+        if (!requiresDisk()) return;
+        
+        std::cout << "\n=== INSERCION DETALLADA DE REGISTRO ===" << std::endl;
+        
+        std::string table_name;
+        std::cout << "Nombre de la tabla: ";
+        std::getline(std::cin, table_name);
+        
+        std::cout << "Valores separados por comas: ";
+        std::string values_str;
+        std::getline(std::cin, values_str);
+        
+        std::vector<std::string> values = parseCSVLine(values_str);
+        
+        std::cout << "\n🔄 PROCESO DE INSERCION CON PAGE DIRECTORY:" << std::endl;
+        std::cout << "1. Datos del registro:" << std::endl;
+        std::cout << "   - Tabla: " << table_name << std::endl;
+        std::cout << "   - Campos: " << values.size() << std::endl;
+        std::cout << "   - Tamaño estimado: " << estimateRecordSize(values) << " bytes" << std::endl;
+        
+        if (disk_manager->insertRecord(table_name, values)) {
+            std::cout << "\n✅ Registro insertado exitosamente." << std::endl;
+            
+            std::cout << "\n📁 Page Directory actualizado:" << std::endl;
+            disk_manager->displayPageDirectory();
+        } else {
+            std::cout << "\n❌ Error insertando el registro." << std::endl;
+        }
+    }
     
     void loadNRecords() {
         if (!requiresDisk()) return;
@@ -872,8 +728,6 @@ public:
         std::cin >> n_records;
         std::cin.ignore();
         
-        std::cout << "\n🔄 PROCESANDO ARCHIVO CON PAGE DIRECTORY..." << std::endl;
-        
         std::ifstream file(csv_file);
         if (!file.is_open()) {
             std::cout << "❌ Error: No se pudo abrir " << csv_file << std::endl;
@@ -882,8 +736,6 @@ public:
         
         std::string line;
         int loaded = 0;
-        int batch_size = 5;
-        int current_batch = 0;
         
         while (std::getline(file, line) && loaded < n_records) {
             if (line.empty()) continue;
@@ -892,12 +744,8 @@ public:
             if (!values.empty()) {
                 if (disk_manager->insertRecord(table_name, values)) {
                     loaded++;
-                    
-                    // Mostrar progreso por lotes
-                    if (loaded % batch_size == 0 || loaded == n_records) {
-                        current_batch = (loaded - 1) / batch_size + 1;
-                        std::cout << "Lote " << current_batch << " completado (" 
-                                  << loaded << "/" << n_records << " registros)" << std::endl;
+                    if (loaded % 5 == 0) {
+                        std::cout << "Procesados: " << loaded << "/" << n_records << " registros" << std::endl;
                     }
                 }
             }
@@ -906,7 +754,6 @@ public:
         file.close();
         std::cout << "\n✅ Carga completada: " << loaded << " registros procesados." << std::endl;
         
-        // Mostrar Page Directory final
         std::cout << "\n📁 Page Directory final:" << std::endl;
         disk_manager->displayPageDirectory();
     }
@@ -922,7 +769,6 @@ public:
         std::cout << "Archivo CSV: ";
         std::getline(std::cin, csv_file);
         
-        // Contar registros
         int total_records = countRecordsInFile(csv_file);
         if (total_records == 0) {
             std::cout << "❌ Error: Archivo vacío o no encontrado." << std::endl;
@@ -930,12 +776,10 @@ public:
         }
         
         std::cout << "Registros detectados: " << total_records << std::endl;
-        std::cout << "🔄 Iniciando carga completa con Page Directory..." << std::endl;
         
         if (disk_manager->loadFromCSV(table_name, csv_file)) {
             std::cout << "✅ Carga completa exitosa: " << total_records << " registros." << std::endl;
             
-            // Mostrar Page Directory final
             std::cout << "\n📁 Page Directory final:" << std::endl;
             disk_manager->displayPageDirectory();
         } else {
@@ -943,7 +787,6 @@ public:
         }
     }
     
-    // Resto de métodos existentes (findRecord, deleteRecord, etc.)
     void findRecord() {
         if (!requiresDisk()) return;
         
@@ -1006,7 +849,7 @@ public:
         if (!requiresDisk()) return;
         
         std::cout << "\n=== ESTADÍSTICAS DEL SISTEMA INTEGRADO ===" << std::endl;
-        disk_manager->displayStatistics(); // Incluye Page Directory
+        disk_manager->displayStatistics();
         
         if (current_state == SystemState::BUFFER_POOL_READY) {
             std::cout << "\n📊 Estadísticas del Buffer Pool:" << std::endl;
@@ -1015,9 +858,6 @@ public:
             std::cout << "   - Frames ocupados: " << stats.occupied_frames << std::endl;
             std::cout << "   - Utilización: " << std::fixed << std::setprecision(1) 
                       << stats.utilization << "%" << std::endl;
-            std::cout << "   - Total operaciones: " << stats.total_operations << std::endl;
-            std::cout << "   - Page faults: " << stats.page_faults << std::endl;
-            std::cout << "   - Evictions: " << stats.evictions << std::endl;
         }
     }
     
@@ -1026,59 +866,33 @@ public:
         
         disk_manager->showDirectoryStructure();
     }
+
+    // ========== SIMULATION METHODS ==========
     
-    // Simulaciones existentes (sin cambios significativos)
     void simulateInsufficientSpace() {
         if (!requiresDisk()) return;
         
         std::cout << "\n=== SIMULACION: ESPACIO INSUFICIENTE ===" << std::endl;
-        
-        std::string table_name;
-        std::cout << "Tabla para simulacion: ";
-        std::getline(std::cin, table_name);
-        
-        std::cout << "\n🎯 ESCENARIO SIMULADO:" << std::endl;
-        std::cout << "- Sector actual: Plato_0/Superficie_0/Pista_2/Sector_15" << std::endl;
-        std::cout << "- Tamaño sector: 4096 bytes" << std::endl;
-        std::cout << "- Espacio usado: 3900 bytes" << std::endl;
-        std::cout << "- Espacio libre: 196 bytes" << std::endl;
-        std::cout << "- Registro nuevo: 512 bytes" << std::endl;
-        std::cout << "\n❌ RESULTADO: Espacio insuficiente (deficit: 316 bytes)" << std::endl;
-        std::cout << "\n🔄 SOLUCION CON PAGE DIRECTORY:" << std::endl;
-        std::cout << "1. DiskManager busca próximo sector disponible" << std::endl;
-        std::cout << "2. Sector_18 encontrado con 2048 bytes libres" << std::endl;
-        std::cout << "3. Page Directory actualizado automáticamente" << std::endl;
-        std::cout << "4. Nuevo mapeo: PageID → Sector_18" << std::endl;
-        std::cout << "5. Inserción completada exitosamente" << std::endl;
+        std::cout << "🎯 ESCENARIO SIMULADO:" << std::endl;
+        std::cout << "- Sector actual: Lleno" << std::endl;
+        std::cout << "- DiskManager busca nuevo sector automáticamente" << std::endl;
+        std::cout << "- Page Directory se actualiza automáticamente" << std::endl;
+        std::cout << "✅ Simulación completada" << std::endl;
     }
     
     void simulateFullSectors() {
         if (!requiresDisk()) return;
         
         std::cout << "\n=== SIMULACION: SECTORES LLENOS ===" << std::endl;
-        
-        std::string table_name;
-        std::cout << "Tabla para simulacion: ";
-        std::getline(std::cin, table_name);
-        
-        std::cout << "\n🎯 ESCENARIO SIMULADO:" << std::endl;
-        std::cout << "Verificando pista actual..." << std::endl;
-        for (int i = 0; i < 8; i++) {
-            std::cout << "- Sector_" << i << ": LLENO (4096/4096 bytes)" << std::endl;
-        }
-        
-        std::cout << "\n❌ RESULTADO: Todos los sectores de la pista están llenos" << std::endl;
-        std::cout << "\n🔄 SOLUCION CON PAGE DIRECTORY:" << std::endl;
-        std::cout << "1. DiskManager busca siguiente pista disponible" << std::endl;
-        std::cout << "2. Pista_3 encontrada con sectores libres" << std::endl;
-        std::cout << "3. Nuevo bloque creado en Pista_3/Sector_0" << std::endl;
-        std::cout << "4. Page Directory registra automáticamente el mapeo" << std::endl;
-        std::cout << "5. Nuevo PageID asignado y persistido" << std::endl;
-        std::cout << "6. Registro insertado en nuevo bloque" << std::endl;
-        std::cout << "7. Estadísticas actualizadas" << std::endl;
+        std::cout << "🎯 ESCENARIO SIMULADO:" << std::endl;
+        std::cout << "- Todos los sectores de la pista están llenos" << std::endl;
+        std::cout << "- DiskManager busca nueva pista automáticamente" << std::endl;
+        std::cout << "- Page Directory registra nueva ubicación" << std::endl;
+        std::cout << "✅ Simulación completada" << std::endl;
     }
+
+    // ========== DATASET OPERATIONS ==========
     
-    // Dataset loading methods
     bool loadDataset(const std::string& dataset_name, const std::string& filename) {
         if (!requiresDisk()) return false;
         
@@ -1094,21 +908,15 @@ public:
         
         std::cout << "\n=== CARGANDO DATASET " << dataset_name << " ===" << std::endl;
         std::cout << "Descripción: " << schema.description << std::endl;
-        std::cout << "Tabla destino: " << schema.table_name << std::endl;
         
-        // Crear tabla
         if (!disk_manager->createTable(schema.table_name, schema.schema, true)) {
             std::cout << "❌ Error creando tabla." << std::endl;
             return false;
         }
         
-        std::cout << "✅ Tabla creada con " << schema.expected_fields << " campos." << std::endl;
-        
-        // Contar registros
         int total_records = countRecordsInFile(filename);
         std::cout << "📊 Registros a procesar: " << total_records << std::endl;
         
-        // Cargar datos
         std::ifstream file(filename);
         if (!file.is_open()) {
             std::cout << "❌ Error abriendo archivo " << filename << std::endl;
@@ -1119,40 +927,25 @@ public:
         std::getline(file, line); // Saltar header
         
         int loaded = 0;
-        int errors = 0;
-        
         while (std::getline(file, line)) {
             if (line.empty()) continue;
             
             std::vector<std::string> values = parseCSVLine(line, schema.delimiter);
             
-            // Ajustar numero de campos si es necesario
-            if (static_cast<int>(values.size()) > schema.expected_fields) {
+            if (static_cast<int>(values.size()) >= schema.expected_fields) {
                 values.resize(schema.expected_fields);
-            }
-            
-            if (static_cast<int>(values.size()) == schema.expected_fields) {
                 if (disk_manager->insertRecord(schema.table_name, values)) {
                     loaded++;
                     if (loaded % 100 == 0) {
                         std::cout << "📈 Procesados: " << loaded << " registros..." << std::endl;
                     }
-                } else {
-                    errors++;
                 }
-            } else {
-                errors++;
             }
         }
         
         file.close();
+        std::cout << "\n✅ Carga completada: " << loaded << " registros" << std::endl;
         
-        std::cout << "\n✅ Carga completada:" << std::endl;
-        std::cout << "   - Registros exitosos: " << loaded << std::endl;
-        std::cout << "   - Errores: " << errors << std::endl;
-        std::cout << "   - Tabla: " << schema.table_name << std::endl;
-        
-        // Mostrar Page Directory actualizado
         std::cout << "\n📁 Page Directory actualizado:" << std::endl;
         disk_manager->displayPageDirectory();
         
@@ -1160,6 +953,8 @@ public:
     }
 
 private:
+    // ========== HELPER FUNCTIONS ==========
+    
     std::map<std::string, DatasetSchema> getDatasetSchemas() {
         std::map<std::string, DatasetSchema> datasets;
         
@@ -1170,40 +965,11 @@ private:
                 {"area", FieldType::INTEGER, 0},
                 {"bedrooms", FieldType::INTEGER, 0},
                 {"bathrooms", FieldType::INTEGER, 0},
-                {"stories", FieldType::INTEGER, 0},
-                {"mainroad", FieldType::STRING, 10},
-                {"guestroom", FieldType::STRING, 10},
-                {"basement", FieldType::STRING, 10},
-                {"hotwaterheating", FieldType::STRING, 10},
-                {"airconditioning", FieldType::STRING, 10},
-                {"parking", FieldType::INTEGER, 0},
-                {"prefarea", FieldType::STRING, 10},
-                {"furnishingstatus", FieldType::STRING, 20}
+                {"stories", FieldType::INTEGER, 0}
             },
             ',',
-            "Dataset de viviendas con 13 campos",
-            13
-        };
-        
-        datasets["titanic"] = {
-            "pasajeros_titanic",
-            {
-                {"passenger_id", FieldType::INTEGER, 0},
-                {"survived", FieldType::INTEGER, 0},
-                {"pclass", FieldType::INTEGER, 0},
-                {"name", FieldType::STRING, 100},
-                {"sex", FieldType::STRING, 10},
-                {"age", FieldType::FLOAT, 0},
-                {"sibsp", FieldType::INTEGER, 0},
-                {"parch", FieldType::INTEGER, 0},
-                {"ticket", FieldType::STRING, 30},
-                {"fare", FieldType::FLOAT, 0},
-                {"cabin", FieldType::STRING, 20},
-                {"embarked", FieldType::STRING, 5}
-            },
-            '\t',
-            "Dataset del Titanic con 12 campos",
-            12
+            "Dataset de viviendas simplificado",
+            5
         };
         
         return datasets;
@@ -1218,8 +984,6 @@ private:
             if (c == '"') {
                 in_quotes = !in_quotes;
             } else if (c == delimiter && !in_quotes) {
-                value.erase(0, value.find_first_not_of(" \t\r"));
-                value.erase(value.find_last_not_of(" \t\r") + 1);
                 values.push_back(value);
                 value.clear();
             } else {
@@ -1227,8 +991,6 @@ private:
             }
         }
         
-        value.erase(0, value.find_first_not_of(" \t\r"));
-        value.erase(value.find_last_not_of(" \t\r") + 1);
         if (!value.empty()) {
             values.push_back(value);
         }
@@ -1246,7 +1008,7 @@ private:
         
         while (std::getline(file, line)) {
             if (first_line) {
-                first_line = false; // Saltar header
+                first_line = false;
                 continue;
             }
             if (!line.empty()) count++;
@@ -1259,71 +1021,65 @@ private:
     size_t estimateRecordSize(const std::vector<std::string>& values) {
         size_t size = 0;
         for (const auto& val : values) {
-            size += val.length() + 8; // Valor + overhead
+            size += val.length() + 8;
         }
         return size;
     }
 };
 
 /**
- * @brief Menú principal actualizado con Buffer Pool
+ * @brief Menú principal
  */
 void showMenu() {
     std::cout << "\n" << std::string(70, '=') << std::endl;
     std::cout << "SGBD FISICO INTEGRADO - MENU PRINCIPAL" << std::endl;
-    std::cout << "Sistema con Buffer Pool Management + Page Directory" << std::endl;
+    std::cout << "Sistema con Buffer Pool Management + Clock Algorithm" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
     
-    std::cout << "\n🚀 INICIALIZACION DEL SISTEMA:" << std::endl;
-    std::cout << "1.  Inicializar nuevo disco extendido" << std::endl;
-    std::cout << "2.  Cargar disco existente extendido" << std::endl;
-    std::cout << "3.  Ver estado del sistema integrado" << std::endl;
+    std::cout << "\n🚀 INICIALIZACION:" << std::endl;
+    std::cout << "1.  Inicializar nuevo disco" << std::endl;
+    std::cout << "2.  Cargar disco existente" << std::endl;
+    std::cout << "3.  Ver estado del sistema" << std::endl;
     
-    std::cout << "\n🏊 BUFFER POOL MANAGEMENT:" << std::endl;
-    std::cout << "18. Inicializar Buffer Pool Manager" << std::endl;
-    std::cout << "19. Test de operaciones Buffer Pool" << std::endl;
-    std::cout << "20. Operaciones de páginas (READ/WRITE)" << std::endl;
-    std::cout << "21. Crear nueva página con Buffer Pool" << std::endl;
-    std::cout << "22. Ver estado del Buffer Pool" << std::endl;
-    std::cout << "23. Flush todas las páginas dirty" << std::endl;
-    
-    std::cout << "\n📁 PAGE DIRECTORY (GESTIONADO POR DISK MANAGER):" << std::endl;
-    std::cout << "24. Mostrar Page Directory" << std::endl;
-    
-    std::cout << "\n🗂️ GESTION DE TABLAS:" << std::endl;
-    std::cout << "4.  Crear tabla (longitud fija/variable)" << std::endl;
-    
-    std::cout << "\n📊 INSERCION DE DATOS (CON PAGE DIRECTORY):" << std::endl;
-    std::cout << "5.  Insertar 1 registro (proceso paso a paso)" << std::endl;
-    std::cout << "6.  Cargar N registros desde CSV" << std::endl;
+    std::cout << "\n🗂️ TABLAS:" << std::endl;
+    std::cout << "4.  Crear tabla" << std::endl;
+    std::cout << "5.  Insertar registro" << std::endl;
+    std::cout << "6.  Cargar N registros CSV" << std::endl;
     std::cout << "7.  Cargar CSV completo" << std::endl;
+    std::cout << "8.  Cargar dataset Housing" << std::endl;
+    std::cout << "9.  Cargar dataset Titanic" << std::endl;
     
-    std::cout << "\n📋 DATASETS PREDEFINIDOS:" << std::endl;
-    std::cout << "8.  Cargar dataset Housing (545 registros)" << std::endl;
-    std::cout << "9.  Cargar dataset Titanic (891 registros)" << std::endl;
-    
-    std::cout << "\n🎯 SIMULACIONES DE PROBLEMAS:" << std::endl;
-    std::cout << "10. Simular sector sin espacio suficiente" << std::endl;
+    std::cout << "\n🎯 SIMULACIONES:" << std::endl;
+    std::cout << "10. Simular espacio insuficiente" << std::endl;
     std::cout << "11. Simular sectores llenos" << std::endl;
     
-    std::cout << "\n🔍 CONSULTAS Y OPERACIONES:" << std::endl;
-    std::cout << "12. Buscar registro por ID" << std::endl;
+    std::cout << "\n🔍 CONSULTAS:" << std::endl;
+    std::cout << "12. Buscar registro" << std::endl;
     std::cout << "13. Eliminar registro" << std::endl;
-    std::cout << "14. Mostrar tabla completa" << std::endl;
+    std::cout << "14. Mostrar tabla" << std::endl;
     std::cout << "15. Compactar tabla" << std::endl;
     
-    std::cout << "\n📈 INFORMACION DEL SISTEMA:" << std::endl;
-    std::cout << "16. Mostrar estadísticas integradas" << std::endl;
-    std::cout << "17. Mostrar estructura de directorios" << std::endl;
-
-    std::cout << "\n🕐 CLOCK BUFFER MANAGER:" << std::endl;
-    std::cout << "25. Inicializar Clock Buffer Manager" << std::endl;
-    std::cout << "26. Test operaciones Clock básicas" << std::endl;
-    std::cout << "27. Demostrar Clock vs LRU" << std::endl;
-    std::cout << "28. Operaciones avanzadas Clock" << std::endl;
-    std::cout << "29. Estado Clock Buffer Manager" << std::endl;
+    std::cout << "\n📈 ESTADÍSTICAS:" << std::endl;
+    std::cout << "16. Mostrar estadísticas" << std::endl;
+    std::cout << "17. Mostrar estructura" << std::endl;
+    
+    std::cout << "\n🏊 BUFFER POOL (LRU):" << std::endl;
+    std::cout << "18. Inicializar Buffer Pool" << std::endl;
+    std::cout << "19. Test Buffer Pool" << std::endl;
+    std::cout << "20. Operaciones páginas" << std::endl;
+    std::cout << "21. Crear nueva página" << std::endl;
+    std::cout << "22. Estado Buffer Pool" << std::endl;
+    std::cout << "23. Flush páginas" << std::endl;
+    std::cout << "24. Mostrar Page Directory" << std::endl;
+    
+    std::cout << "\n🕐 CLOCK ALGORITHM:" << std::endl;
+    std::cout << "25. Inicializar Clock Buffer" << std::endl;
+    std::cout << "26. Test Clock básico" << std::endl;
+    std::cout << "27. Demo Clock vs LRU" << std::endl;
+    std::cout << "28. Operaciones Clock avanzadas" << std::endl;
+    std::cout << "29. Estado Clock Buffer" << std::endl;
     std::cout << "30. Flush páginas Clock" << std::endl;
-    std::cout << "31. Comparar rendimiento Clock vs LRU" << std::endl;
+    std::cout << "31. Comparar Clock vs LRU" << std::endl;
     
     std::cout << "\n0.  Salir" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
@@ -1331,37 +1087,18 @@ void showMenu() {
 }
 
 /**
- * @brief Función principal con sistema integrado
+ * @brief Función principal
  */
 int main() {
     SGBDSystemExtended sistema;
     int option;
     
     std::cout << std::string(80, '=') << std::endl;
-    std::cout << "SISTEMA DE GESTION DE BASE DE DATOS FISICO INTEGRADO" << std::endl;
-    std::cout << "🚀 Buffer Pool Management + Page Directory" << std::endl;
-    std::cout << "📚 Implementación Educativa - Almacenamiento Secundario" << std::endl;
-    std::cout << "🎓 Basado en Database System Implementation + CMU Lectures" << std::endl;
+    std::cout << "SISTEMA DE GESTION DE BASE DE DATOS FISICO" << std::endl;
+    std::cout << "🚀 Buffer Pool + Clock Algorithm Implementation" << std::endl;
+    std::cout << "🎓 Educativo - Carnegie Mellon University Style" << std::endl;
     std::cout << std::string(80, '=') << std::endl;
     
-    std::cout << "\n🏗️ ARQUITECTURA DEL SISTEMA:" << std::endl;
-    std::cout << "┌─────────────────────────────────────────────────────────┐" << std::endl;
-    std::cout << "│                    APLICACION                           │" << std::endl;
-    std::cout << "├─────────────────────────────────────────────────────────┤" << std::endl;
-    std::cout << "│              BUFFER POOL MANAGER                        │" << std::endl;
-    std::cout << "│  ┌──────────────┬──────────────┬─────────────────────┐  │" << std::endl;
-    std::cout << "│  │ Page Table   │ LRU Replacer │ Buffer Pool (Frames)│  │" << std::endl;
-    std::cout << "│  │ (Memoria)    │ (Eviction)   │ (Memoria)           │  │" << std::endl;
-    std::cout << "│  └──────────────┴──────────────┴─────────────────────┘  │" << std::endl;
-    std::cout << "├─────────────────────────────────────────────────────────┤" << std::endl;
-    std::cout << "│             DISK MANAGER EXTENDED                       │" << std::endl;
-    std::cout << "│  ┌─────────────────────┬─────────────────────────────┐  │" << std::endl;
-    std::cout << "│  │ Page Directory      │ File System Simulator       │  │" << std::endl;
-    std::cout << "│  │ (Disco - Persistente)│ (Tu sistema existente)     │  │" << std::endl;
-    std::cout << "│  └─────────────────────┴─────────────────────────────┘  │" << std::endl;
-    std::cout << "└─────────────────────────────────────────────────────────┘" << std::endl;
-    
-    // Mostrar estado inicial
     sistema.showSystemStatus();
     
     while (true) {
@@ -1370,144 +1107,49 @@ int main() {
         std::cin.ignore();
         
         switch (option) {
-            case 1:
-                sistema.initializeDisk();
-                break;
-                
-            case 2:
-                sistema.loadExistingDisk();
-                break;
-                
-            case 3:
-                sistema.showSystemStatus();
-                break;
-                
-            case 4:
-                sistema.createTable();
-                break;
-                
-            case 5:
-                sistema.insertSingleRecord();
-                break;
-                
-            case 6:
-                sistema.loadNRecords();
-                break;
-                
-            case 7:
-                sistema.loadCompleteCSV();
-                break;
-                
-            case 8:
-                sistema.loadDataset("housing", "Housing.csv");
-                break;
-                
-            case 9:
-                sistema.loadDataset("titanic", "titanic.csv");
-                break;
-                
-            case 10:
-                sistema.simulateInsufficientSpace();
-                break;
-                
-            case 11:
-                sistema.simulateFullSectors();
-                break;
-                
-            case 12:
-                sistema.findRecord();
-                break;
-                
-            case 13:
-                sistema.deleteRecord();
-                break;
-                
-            case 14:
-                sistema.displayTable();
-                break;
-                
-            case 15:
-                sistema.compactTable();
-                break;
-                
-            case 16:
-                sistema.showStatistics();
-                break;
-                
-            case 17:
-                sistema.showDirectoryStructure();
-                break;
-                
-            // ========== NUEVAS OPCIONES BUFFER POOL ==========
-            case 18:
-                sistema.initializeBufferPool();
-                break;
-                
-            case 19:
-                sistema.testBufferPoolOperations();
-                break;
-                
-            case 20:
-                sistema.bufferPoolPageOperations();
-                break;
-                
-            case 21:
-                sistema.createNewPageBuffered();
-                break;
-                
-            case 22:
-                sistema.showBufferPoolStatus();
-                break;
-                
-            case 23:
-                sistema.flushAllPages();
-                break;
-                
-            case 24:
-                sistema.showPageDirectory();
-                break;
-
-            case 25:
-                sistema.initializeClockBufferPool();
-                break;
-    
-            case 26:
-                sistema.testClockBufferOperations();
-                break;
-    
-            case 27:
-                sistema.demonstrateClockVsLRU();
-                break;
-    
-            case 28:
-                sistema.clockAdvancedPageOperations();
-                break;
-    
-            case 29:
-                sistema.showClockBufferStatus();
-                break;
-    
-            case 30:
-                sistema.flushAllClockPages();
-                break;
-    
-            case 31:
-                sistema.compareClockVsLRUPerformance();
-                break;
-
-                
+            case 1: sistema.initializeDisk(); break;
+            case 2: sistema.loadExistingDisk(); break;
+            case 3: sistema.showSystemStatus(); break;
+            case 4: sistema.createTable(); break;
+            case 5: sistema.insertSingleRecord(); break;
+            case 6: sistema.loadNRecords(); break;
+            case 7: sistema.loadCompleteCSV(); break;
+            case 8: sistema.loadDataset("housing", "Housing.csv"); break;
+            case 9: sistema.loadDataset("titanic", "titanic.csv"); break;
+            case 10: sistema.simulateInsufficientSpace(); break;
+            case 11: sistema.simulateFullSectors(); break;
+            case 12: sistema.findRecord(); break;
+            case 13: sistema.deleteRecord(); break;
+            case 14: sistema.displayTable(); break;
+            case 15: sistema.compactTable(); break;
+            case 16: sistema.showStatistics(); break;
+            case 17: sistema.showDirectoryStructure(); break;
+            case 18: sistema.initializeBufferPool(); break;
+            case 19: sistema.testBufferPoolOperations(); break;
+            case 20: sistema.bufferPoolPageOperations(); break;
+            case 21: sistema.createNewPageBuffered(); break;
+            case 22: sistema.showBufferPoolStatus(); break;
+            case 23: sistema.flushAllPages(); break;
+            case 24: sistema.showPageDirectory(); break;
+            case 25: sistema.initializeClockBufferPool(); break;
+            case 26: sistema.testClockBufferOperations(); break;
+            case 27: sistema.demonstrateClockVsLRU(); break;
+            case 28: sistema.clockAdvancedPageOperations(); break;
+            case 29: sistema.showClockBufferStatus(); break;
+            case 30: sistema.flushAllClockPages(); break;
+            case 31: sistema.compareClockVsLRUPerformance(); break;
+            
             case 0:
-                std::cout << "\n🎓 ¡Gracias por usar el SGBD Físico Integrado!" << std::endl;
-                std::cout << "📚 Has experimentado con:" << std::endl;
-                std::cout << "   ✅ Buffer Pool Management profesional" << std::endl;
-                std::cout << "   ✅ Page Directory persistente" << std::endl;
-                std::cout << "   ✅ Política LRU de evicción" << std::endl;
-                std::cout << "   ✅ Gestión avanzada de memoria" << std::endl;
-                std::cout << "🚀 ¡Sistema de base de datos de nivel profesional!" << std::endl;
+                std::cout << "\n🎓 ¡Gracias por usar el SGBD Físico!" << std::endl;
+                std::cout << "✅ Implementaciones completadas:" << std::endl;
+                std::cout << "   • Buffer Pool Management (LRU)" << std::endl;
+                std::cout << "   • Clock Algorithm (Aproximación LRU)" << std::endl;
+                std::cout << "   • Page Directory persistente" << std::endl;
+                std::cout << "   • Comparación de algoritmos" << std::endl;
                 return 0;
                 
             default:
-                std::cout << "\n❌ Opción no válida. Selecciona 0-24." << std::endl;
+                std::cout << "\n❌ Opción no válida. Selecciona 0-31." << std::endl;
                 break;
         }
         
