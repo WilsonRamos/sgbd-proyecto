@@ -113,7 +113,7 @@ public:
         // 1. Verificar si está en Page Table (memoria)
         PageTableEntry entry;
         if (page_table->findPage(page_id, entry)) {
-            std::cout << "Página " << page_id << " encontrada en memoria (Frame " 
+            std::cout << "✅ Página " << page_id << " encontrada en memoria (Frame " 
                       << entry.frame_id << ")" << std::endl;
             
             // Pin la página

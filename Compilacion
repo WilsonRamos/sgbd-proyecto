@@ -1,0 +1,14 @@
+g++ -std=c++17 -lstdc++fs testRegistrosFixed2.cpp -o fixed
+    g++ -std=c++17 main_ejemplo_integracion.cpp -o demo -Iinclude -Iinclude/buffer -finput-charset=UTF-8
+# Opción 1: Con C++17 y filesystem
+g++ -std=c++17 -Iinclude -Iinclude/buffer \
+    main_simple.cpp -lstdc++fs -o demo_simple
+
+# Opción 2: Si la anterior falla
+g++ -std=c++17 -Iinclude -Iinclude/buffer \
+    main_simple.cpp -o demo_simple
+
+# Opción 3: Forzar C++17
+g++ -std=c++17 -Iinclude -Iinclude/buffer \
+    -DFILESYSTEM_HEADER='"filesystem"' \
+    main_simple.cpp -lstdc++fs -o demo_simple

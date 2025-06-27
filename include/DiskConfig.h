@@ -28,11 +28,13 @@ public:
     /**
      * @brief Constructor por defecto - Configuración tipo Megatron 747
      */
+
+
     DiskConfig() 
         : num_platters(4)
         , surfaces_per_platter(2)
-        , tracks_per_surface(65536)
-        , sectors_per_track(256)
+        , tracks_per_surface(100)
+        , sectors_per_track(100)
         , bytes_per_sector(4096)
         , seek_time_ms(6.46)
         , rotational_latency_ms(4.17)

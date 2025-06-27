@@ -6,9 +6,6 @@
 #include <iomanip>
 #include <chrono>
 
-/**
- * @brief Metadatos de una página en el buffer pool
- */
 struct PageTableEntry {
     int frame_id;           // ID del frame en el buffer pool
     int pin_count;          // Número de procesos usando la página
@@ -52,6 +49,7 @@ struct PageTableEntry {
 /**
  * @brief Page Table - Mapeo en memoria de PageID a FrameID
  * 
+ * Implementa el concepto de Page Table de la conferencia CMU:
  * - Estructura en memoria (volátil)
  * - Mapea PageID → FrameID
  * - Mantiene metadatos: dirty_bit, pin_count, valid_bit
@@ -89,6 +87,19 @@ public:
         std::cout << "🗂️  Page Table: Página " << page_id 
                   << " → Frame " << frame_id << std::endl;
         return true;
+    }
+
+    /**
+     * @brief Busca una página en la tabla SIN actualizar access time (solo para debugging/stats)
+     */
+    bool findPageReadOnly(int page_id, PageTableEntry& entry) const {
+        auto it = table.find(page_id);
+        if (it != table.end()) {
+            entry = it->second;
+            // NO actualizar tiempo - solo lectura
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -278,12 +289,18 @@ public:
             std::cout << std::string(48, '-') << std::endl;
             
             for (const auto& entry : table) {
+                // Calcular tiempo manualmente para no modificar el estado const
+                auto now = std::chrono::steady_clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - entry.second.last_access_time);
+                long long time_since_access = duration.count();
+                
                 std::cout << std::setw(8) << entry.first
                           << std::setw(8) << entry.second.frame_id
                           << std::setw(6) << entry.second.pin_count
                           << std::setw(7) << (entry.second.dirty_bit ? "YES" : "NO")
                           << std::setw(7) << (entry.second.valid_bit ? "YES" : "NO")
-                          << std::setw(12) << entry.second.getTimeSinceLastAccess() << "ms"
+                          << std::setw(12) << time_since_access << "ms"
                           << std::endl;
             }
         }

@@ -1,7 +1,0 @@
-# Esquema de la tabla: empleados_variables
-record_type=VARIABLE
-field_count=4
-nombre|2|0|0
-edad|0|0|0
-puesto|2|0|0
-salario|1|0|0

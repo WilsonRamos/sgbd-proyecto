@@ -1,7 +1,0 @@
-# Esquema de la tabla: empleados_fijos
-record_type=FIXED
-field_count=4
-nombre|2|50|0
-edad|0|0|0
-puesto|2|30|0
-salario|1|0|0
