@@ -35,13 +35,20 @@ struct ClockBufferPage {
 };
 
 /**
- * @brief Buffer Manager with PIN-AWARE Clock Algorithm
+ * @brief Buffer Manager with PIN-AWARE Clock Algorithm MEJORADO
  * 
  * Versión corregida que:
  * - ✅ NUNCA evicta páginas con pin_count > 0
- * - ✅ Segunda pasada disminuye pin_count automáticamente
+ * - ✅ CADA PASADA disminuye pin_count automáticamente
+ * - ✅ Garantiza encontrar víctimas eventualmente
  * - ✅ Usa tu PageTable API correctamente
- * - ✅ Integrado con ClockReplacer pin-aware
+ * - ✅ Integrado con ClockReplacer pin-aware MEJORADO
+ * - ✅ SINCRONIZACIÓN: Dirty bits coherentes en BufferPool y PageTable
+ * 
+ * DIRTY BIT SINCRONIZATION:
+ * - ClockBufferPage::is_dirty (usado para display y evicción)
+ * - PageTableEntry::dirty_bit (usado para estadísticas y API)
+ * - Ambos se mantienen sincronizados en todas las operaciones
  */
 class BufferManagerClock {
 private:
@@ -50,7 +57,7 @@ private:
     std::vector<bool> free_frames;                    // Frames libres
     
     std::unique_ptr<PageTable> page_table;            // Page Table (memoria)
-    std::unique_ptr<ClockReplacer> clock_replacer;    // Política Clock PIN-AWARE
+    std::unique_ptr<ClockReplacer> clock_replacer;    // Política Clock PIN-AWARE MEJORADA
     
     DiskManagerExtended* disk_manager;                // Referencia al disk manager extendido
     
@@ -64,7 +71,7 @@ private:
 
 public:
     /**
-     * @brief Constructor - CORREGIDO para pin-awareness
+     * @brief Constructor - CORREGIDO para pin-awareness MEJORADA
      */
     BufferManagerClock(size_t pool_size, DiskManagerExtended* dm)
         : pool_size(pool_size)
@@ -80,14 +87,15 @@ public:
     {
         page_table = std::make_unique<PageTable>();
         
-        // ✅ CORREGIDO: ClockReplacer ahora recibe PageTable
+        // ✅ CORREGIDO: ClockReplacer MEJORADO ahora recibe PageTable
         clock_replacer = std::make_unique<ClockReplacer>(pool_size, page_table.get());
         
-        std::cout << "🕐 BufferManagerClock PIN-AWARE inicializado:" << std::endl;
+        std::cout << "🕐 BufferManagerClock PIN-AWARE MEJORADO inicializado:" << std::endl;
         std::cout << "   📦 Pool size: " << pool_size << " frames" << std::endl;
-        std::cout << "   🔄 Algoritmo: Clock PIN-AWARE (no evicta páginas pinned)" << std::endl;
-        std::cout << "   ⚡ Segunda pasada disminuye pin_count automáticamente" << std::endl;
-        std::cout << "   🛡️  Protección contra evicción incorrecta" << std::endl;
+        std::cout << "   🔄 Algoritmo: Clock PIN-AWARE MEJORADO (garantía de víctimas)" << std::endl;
+        std::cout << "   ⚡ CADA pasada disminuye pin_count automáticamente" << std::endl;
+        std::cout << "   🛡️  Protección total contra evicción incorrecta" << std::endl;
+        std::cout << "   🎯 Eventualmente encuentra víctimas SIEMPRE" << std::endl;
     }
 
     /**
@@ -124,10 +132,11 @@ public:
         // 3. Buscar frame libre o evictar
         int frame_id = getFreeFrame();
         if (frame_id == -1) {
-            std::cout << "⚠️  Buffer pool lleno, evictando con Clock PIN-AWARE..." << std::endl;
+            std::cout << "⚠️  Buffer pool lleno, evictando con Clock PIN-AWARE MEJORADO..." << std::endl;
             frame_id = evictPage();
             if (frame_id == -1) {
-                std::cout << "❌ Error: No se pudo evictar ninguna página (todas pinned?)" << std::endl;
+                std::cout << "❌ Error: No se pudo evictar ninguna página (algoritmo falló)" << std::endl;
+                std::cout << "   🔍 Esto NO debería ocurrir con el algoritmo MEJORADO" << std::endl;
                 return nullptr;
             }
         }
@@ -143,181 +152,167 @@ public:
         buffer_pool[frame_id] = ClockBufferPage(page_id, page_block);
         free_frames[frame_id] = false;
         
-        // 6. Actualizar Page Table
-        page_table->insertPage(page_id, frame_id);
-        page_table->pinPage(page_id);  // ✅ Pin la página inicialmente
+        // 6. Actualizar Page Table usando tu API
+        if (!page_table->insertPage(page_id, frame_id)) {
+            std::cout << "❌ Error agregando página " << page_id << " al Page Table" << std::endl;
+            return nullptr;
+        }
         
-        read_operations++;
-        std::cout << "📖 Clock: Página " << page_id 
+        // 7. Pin la página y notificar al Clock Replacer
+        page_table->pinPage(page_id);
+        clock_replacer->recordAccess(frame_id);
+        
+        std::cout << "✅ Clock LOAD: Página " << page_id 
                   << " cargada en frame " << frame_id 
-                  << " (pin_count=1)" << std::endl;
+                  << " (pinned=1)" << std::endl;
         
-        return page_block;
+        return buffer_pool[frame_id].block;
     }
 
     /**
-     * @brief Libera el pin de una página - CLAVE para Clock Algorithm
+     * @brief Desancla una página (permite evicción)
      */
-    bool unpinPage(int page_id, bool is_dirty = false) {
+    bool unpinPage(int page_id, bool is_dirty) {
         PageTableEntry entry;
-        if (!page_table->findPageReadOnly(page_id, entry) || !entry.valid_bit) {
+        if (!page_table->findPage(page_id, entry) || !entry.valid_bit) {
+            std::cout << "❌ Clock UNPIN: Página " << page_id << " no en memoria" << std::endl;
             return false;
         }
         
-        if (entry.pin_count <= 0) {
-            std::cout << "⚠️  Warning: Página " << page_id << " ya está unpinned" << std::endl;
-            return false;
-        }
-        
-        // ✅ Usar tu API para decrementar pin
-        page_table->unpinPage(page_id, is_dirty);
+        // ✅ SINCRONIZACIÓN: Actualizar ambos dirty bits
         if (is_dirty) {
+            // 1. Actualizar dirty en BufferManagerClock
             buffer_pool[entry.frame_id].is_dirty = true;
+            // 2. Actualizar dirty en PageTable (se hace en unpinPage())
+            std::cout << "💾 Clock: Página " << page_id << " marcada como dirty (ambos lugares)" << std::endl;
         }
         
-        // ✅ CLAVE: Si pin_count llega a 0, agregar al Clock Replacer
-        PageTableEntry updated_entry;
-        if (page_table->findPageReadOnly(page_id, updated_entry)) {
-            std::cout << "📍 Clock: Página " << page_id << " unpinned (new pin_count=" 
-                      << updated_entry.pin_count << ", dirty=" << (is_dirty ? "YES" : "NO") << ")" << std::endl;
-            
-            if (updated_entry.pin_count == 0) {
+        // Desanclar usando tu API (esto actualiza PageTable::dirty_bit)
+        bool was_unpinned = page_table->unpinPage(page_id, is_dirty);
+        
+        if (was_unpinned) {
+            // Si el pin count llegó a 0, agregar al clock replacer
+            PageTableEntry updated_entry;
+            if (page_table->findPageReadOnly(page_id, updated_entry) && updated_entry.pin_count == 0) {
                 clock_replacer->unpin(entry.frame_id);
-                std::cout << "🔓 Clock: Página " << page_id << " disponible para evicción" << std::endl;
+                std::cout << "🔓 Clock UNPIN: Página " << page_id 
+                          << " disponible para evicción (pin_count=0)" << std::endl;
+            } else {
+                std::cout << "📌 Clock: Página " << page_id 
+                          << " aún pinned (pin_count=" << updated_entry.pin_count << ")" << std::endl;
             }
         }
         
-        return true;
+        return was_unpinned;
     }
 
     /**
      * @brief Crea una nueva página
      */
     std::shared_ptr<Block> newPage(int& page_id) {
-        // 1. Crear nueva página usando tu API
+        // 1. Generar nuevo page_id usando tu API
         page_id = disk_manager->allocateNewPageId();
-        if (page_id == -1) {
-            std::cout << "❌ Error: No se pudo allocar nueva página" << std::endl;
-            return nullptr;
-        }
         
         // 2. Buscar frame libre o evictar
         int frame_id = getFreeFrame();
         if (frame_id == -1) {
+            std::cout << "⚠️  Buffer pool lleno, evictando para nueva página..." << std::endl;
             frame_id = evictPage();
             if (frame_id == -1) {
-                std::cout << "❌ Error: No se pudo evictar página para nueva" << std::endl;
+                std::cout << "❌ Error: No se pudo evictar para nueva página" << std::endl;
                 return nullptr;
             }
         }
         
-        // 3. Crear bloque usando tu API (requiere PhysicalAddress)
-        PhysicalAddress temp_addr(0, 0, 0, 1);  // Dirección temporal
-        auto new_block = std::make_shared<Block>(temp_addr, 4096);
+        // 3. Crear nuevo bloque
+        PhysicalAddress addr;
+        if (!disk_manager->getAddressForPageId(page_id, addr)) {
+            std::cout << "❌ Error obteniendo dirección para nueva página " << page_id << std::endl;
+            return nullptr;
+        }
+        
+        auto new_block = std::make_shared<Block>(addr, 4096);
         
         // 4. Colocar en buffer pool
         buffer_pool[frame_id] = ClockBufferPage(page_id, new_block);
         buffer_pool[frame_id].is_dirty = true;  // Nueva página siempre es dirty
         free_frames[frame_id] = false;
         
-        // 5. Actualizar Page Table usando tu API
-        page_table->insertPage(page_id, frame_id);
-        page_table->pinPage(page_id);
+        // 5. Actualizar Page Table
+        if (!page_table->insertPage(page_id, frame_id)) {
+            std::cout << "❌ Error agregando nueva página " << page_id << " al Page Table" << std::endl;
+            return nullptr;
+        }
+        
+        // ✅ SINCRONIZACIÓN: Marcar dirty en PageTable también
         page_table->markDirty(page_id);
         
-        std::cout << "➕ Clock: Nueva página " << page_id 
+        // 6. Pin la página y notificar al Clock Replacer
+        page_table->pinPage(page_id);
+        clock_replacer->recordAccess(frame_id);
+        
+        std::cout << "✨ Clock NEW: Página " << page_id 
                   << " creada en frame " << frame_id 
-                  << " (pin_count=1)" << std::endl;
+                  << " (dirty=true en ambos lugares, pinned=1)" << std::endl;
         
         return new_block;
     }
 
     /**
-     * @brief Hace flush de una página específica
+     * @brief Fuerza escritura de una página al disco
      */
     bool flushPage(int page_id) {
         PageTableEntry entry;
         if (!page_table->findPageReadOnly(page_id, entry) || !entry.valid_bit) {
+            std::cout << "❌ Clock FLUSH: Página " << page_id << " no en memoria" << std::endl;
             return false;
         }
         
-        int frame_id = entry.frame_id;
-        if (buffer_pool[frame_id].is_dirty || entry.dirty_bit) {
-            // Escribir página al disco usando tu API
-            bool success = savePageToDisk(page_id, buffer_pool[frame_id].block);
-            if (success) {
-                buffer_pool[frame_id].is_dirty = false;
-                page_table->clearDirty(page_id);
+        if (buffer_pool[entry.frame_id].is_dirty) {
+            if (savePageToDisk(page_id, buffer_pool[entry.frame_id].block)) {
+                // ✅ SINCRONIZACIÓN: Limpiar dirty bit en ambos lugares
+                buffer_pool[entry.frame_id].is_dirty = false;  // BufferManagerClock
+                page_table->clearDirty(page_id);               // PageTable
                 write_operations++;
-                std::cout << "💾 Clock: Página " << page_id << " flushed al disco" << std::endl;
+                std::cout << "💾 Clock FLUSH: Página " << page_id << " escrita al disco (ambos dirty bits limpiados)" << std::endl;
                 return true;
             } else {
-                std::cout << "❌ Error flushing página " << page_id << std::endl;
+                std::cout << "❌ Error escribiendo página " << page_id << " al disco" << std::endl;
                 return false;
             }
         }
         
-        return true;  // No estaba dirty, no necesita flush
-    }
-
-    /**
-     * @brief Hace flush de todas las páginas dirty
-     */
-    void flushAllDirtyPages() {
-        std::cout << "\n💾 Flushing todas las páginas dirty..." << std::endl;
-        
-        size_t flushed_count = 0;
-        for (size_t i = 0; i < pool_size; ++i) {
-            if (!free_frames[i] && buffer_pool[i].is_dirty) {
-                if (flushPage(buffer_pool[i].page_id)) {
-                    flushed_count++;
-                }
-            }
-        }
-        
-        std::cout << "💾 Clock: " << flushed_count << " páginas flushed" << std::endl;
-    }
-
-    /**
-     * @brief Elimina una página del buffer pool y del disco
-     */
-    bool deletePage(int page_id) {
-        // Verificar si está en memoria
-        PageTableEntry entry;
-        if (page_table->findPageReadOnly(page_id, entry) && entry.valid_bit) {
-            if (entry.pin_count > 0) {
-                std::cout << "❌ Error: No se puede eliminar página pinned " << page_id 
-                          << " (pin_count=" << entry.pin_count << ")" << std::endl;
-                return false;
-            }
-            
-            // Remover del buffer pool
-            int frame_id = entry.frame_id;
-            free_frames[frame_id] = true;
-            buffer_pool[frame_id] = ClockBufferPage();  // Reset
-            
-            // Remover del Clock Replacer
-            clock_replacer->remove(frame_id);
-        }
-        
-        // Remover del Page Table usando tu API
-        page_table->removePage(page_id);
-        
-        std::cout << "🗑️  Clock: Página " << page_id << " eliminada del buffer" << std::endl;
+        std::cout << "ℹ️  Clock: Página " << page_id << " no necesita flush (clean)" << std::endl;
         return true;
     }
 
     /**
-     * @brief Obtiene estadísticas del Buffer Manager Clock PIN-AWARE
+     * @brief Fuerza escritura de todas las páginas dirty
+     */
+    void flushAllDirtyPages() {
+        std::cout << "\n💾 Clock: Flushing todas las páginas dirty..." << std::endl;
+        
+        int flushed = 0;
+        for (size_t i = 0; i < pool_size; ++i) {
+            if (!free_frames[i] && buffer_pool[i].is_dirty) {
+                if (flushPage(buffer_pool[i].page_id)) {
+                    flushed++;
+                }
+            }
+        }
+        
+        std::cout << "✅ Clock: " << flushed << " páginas dirty escritas al disco" << std::endl;
+    }
+
+    /**
+     * @brief Muestra estadísticas del buffer manager
      */
     void displayStatistics() const {
-        std::cout << "\n" << std::string(60, '=') << std::endl;
-        std::cout << "ESTADÍSTICAS BUFFER MANAGER CLOCK PIN-AWARE" << std::endl;
-        std::cout << std::string(60, '=') << std::endl;
-        
-        std::cout << "📊 OPERACIONES:" << std::endl;
-        std::cout << "   Lecturas: " << read_operations << std::endl;
-        std::cout << "   Escrituras: " << write_operations << std::endl;
+        std::cout << "\n📊 ESTADÍSTICAS CLOCK BUFFER MANAGER MEJORADO:" << std::endl;
+        std::cout << "   Pool size: " << pool_size << " frames" << std::endl;
+        std::cout << "   Frames ocupados: " << (pool_size - std::count(free_frames.begin(), free_frames.end(), true)) << std::endl;
+        std::cout << "   Read operations: " << read_operations << std::endl;
+        std::cout << "   Write operations: " << write_operations << std::endl;
         std::cout << "   Page Faults: " << page_faults << std::endl;
         std::cout << "   Evictions exitosas: " << evictions << std::endl;
         std::cout << "   Evictions fallidas (pinned): " << failed_evictions << std::endl;
@@ -331,7 +326,7 @@ public:
                       << hit_rate << "%" << std::endl;
         }
         
-        std::cout << "\n🔄 CLOCK REPLACER PIN-AWARE:" << std::endl;
+        std::cout << "\n🔄 CLOCK REPLACER PIN-AWARE MEJORADO:" << std::endl;
         auto stats = clock_replacer->getStats();
         std::cout << "   Frames en uso: " << stats.current_size << "/" << stats.capacity << std::endl;
         std::cout << "   Utilización: " << std::fixed << std::setprecision(1) 
@@ -339,7 +334,7 @@ public:
         std::cout << "   Clock Hand pos: " << stats.clock_hand_pos << std::endl;
         std::cout << "   Reference bits activos: " << stats.active_refs << std::endl;
         std::cout << "   Segunda oportunidades dadas: " << stats.second_chances << std::endl;
-        std::cout << "   Pin decrements (segunda pasada): " << stats.pin_decrements << std::endl;
+        std::cout << "   Pin decrements (automáticos): " << stats.pin_decrements << std::endl;
         
         std::cout << "\n📋 PAGE TABLE:" << std::endl;
         std::cout << "   Entradas totales: " << page_table->getPageCount() << std::endl;
@@ -353,103 +348,48 @@ public:
             if (page_table->findPageReadOnly(page_id, entry)) {
                 if (entry.pin_count > 0) {
                     pinned_pages++;
-                    max_pin_count = std::max(max_pin_count, entry.pin_count);
                 }
+                max_pin_count = std::max(max_pin_count, entry.pin_count);
             }
         }
         
-        std::cout << "\n🔒 PIN ANALYSIS:" << std::endl;
         std::cout << "   Páginas pinned: " << pinned_pages << "/" << all_pages.size() << std::endl;
-        std::cout << "   Max pin count: " << max_pin_count << std::endl;
+        std::cout << "   Pin count máximo: " << max_pin_count << std::endl;
         
-        std::cout << "\n💾 BUFFER POOL:" << std::endl;
-        size_t used_frames = 0;
-        size_t dirty_pages = 0;
-        for (size_t i = 0; i < pool_size; ++i) {
-            if (!free_frames[i]) {
-                used_frames++;
-                if (buffer_pool[i].is_dirty) dirty_pages++;
-            }
+        if (failed_evictions == 0) {
+            std::cout << "\n✅ GARANTÍA CUMPLIDA: Algoritmo MEJORADO siempre encuentra víctimas" << std::endl;
+        } else {
+            std::cout << "\n⚠️  Evictions fallidas: " << failed_evictions 
+                      << " (revisar configuración MAX_PASSES)" << std::endl;
         }
-        std::cout << "   Frames usados: " << used_frames << "/" << pool_size << std::endl;
-        std::cout << "   Páginas dirty: " << dirty_pages << std::endl;
     }
 
     /**
-     * @brief Muestra el estado actual del Clock PIN-AWARE
+     * @brief Muestra estado detallado del Clock con tabla formateada
      */
     void displayClockState() const {
-        std::cout << "\n🕐 ESTADO DEL CLOCK ALGORITHM PIN-AWARE:" << std::endl;
-        clock_replacer->displayInfo();
+        std::cout << "\n🕐 CLOCK BUFFER STATE (PIN-AWARE MEJORADO):" << std::endl;
+        std::cout << "Frame  PageID  Status  Dirty  PinCount  RefBit  ClockPos" << std::endl;
+        std::cout << "-----  ------  ------  -----  --------  ------  --------" << std::endl;
         
-        std::cout << "\n📄 PÁGINAS EN BUFFER POOL:" << std::endl;
-        for (size_t i = 0; i < pool_size; ++i) {
-            std::cout << "Frame[" << i << "]: ";
-            if (!free_frames[i]) {
-                PageTableEntry entry;
-                bool found = page_table->findPageReadOnly(buffer_pool[i].page_id, entry);
-                std::cout << "Page " << buffer_pool[i].page_id;
-                if (found) {
-                    std::cout << " (pins=" << entry.pin_count
-                              << ", dirty=" << (buffer_pool[i].is_dirty ? "Y" : "N")
-                              << ", evictable=" << (entry.pin_count == 0 ? "YES" : "NO") << ")";
-                } else {
-                    std::cout << " (ERROR: not in page table)";
-                }
-            } else {
-                std::cout << "LIBRE";
-            }
-            std::cout << std::endl;
-        }
-    }
-
-    /**
-     * @brief Muestra versión compacta del estado
-     */
-    void displayCompactState() const {
-        std::cout << "\n🕐 Clock State (PIN-AWARE): ";
-        clock_replacer->displayCompact();
-    }
-
-    /**
-     * @brief Test específico para demostrar pin-awareness
-     */
-    void demonstratePinAwareness() {
-        std::cout << "\n🧪 DEMOSTRANDO PIN-AWARENESS DEL CLOCK ALGORITHM" << std::endl;
-        
-        // Crear páginas y dejar algunas pinned
-        std::vector<int> test_pages;
-        for (int i = 0; i < 3; ++i) {
-            int page_id;
-            auto block = newPage(page_id);
-            if (block) {
-                test_pages.push_back(page_id);
-                std::cout << "✨ Página " << page_id << " creada y pinned" << std::endl;
-            }
+        auto frames_info = getFramesInfo();
+        for (size_t i = 0; i < frames_info.size(); ++i) {
+            const auto& info = frames_info[i];
+            
+            std::cout << std::setw(5) << i << "  ";
+            std::cout << std::setw(6) << (info.is_free ? "-" : std::to_string(info.page_id)) << "  ";
+            std::cout << std::setw(6) << (info.is_free ? "FREE" : "USED") << "  ";
+            std::cout << std::setw(5) << (info.is_free ? "-" : (info.is_dirty ? "YES" : "NO")) << "  ";
+            std::cout << std::setw(8) << (info.is_free ? "-" : std::to_string(info.pin_count)) << "  ";
+            std::cout << std::setw(6) << (info.is_free ? "-" : (info.reference_bit ? "1" : "0")) << "  ";
+            std::cout << std::setw(8) << (info.is_clock_hand ? "←HAND" : "") << std::endl;
         }
         
-        // Unpin solo algunas páginas
-        if (test_pages.size() >= 2) {
-            unpinPage(test_pages[0], false);
-            std::cout << "🔓 Página " << test_pages[0] << " unpinned (evictable)" << std::endl;
-            // Dejar test_pages[1] y test_pages[2] pinned
-        }
-        
-        displayClockState();
-        
-        // Intentar crear más páginas para forzar evicción
-        std::cout << "\n🌊 Creando páginas adicionales para forzar evicción..." << std::endl;
-        for (int i = 0; i < pool_size + 2; ++i) {
-            int page_id;
-            auto block = newPage(page_id);
-            if (block) {
-                std::cout << "➕ Página adicional " << page_id << " creada" << std::endl;
-                unpinPage(page_id, false);  // Unpin inmediatamente
-                displayCompactState();
-            }
-        }
-        
-        std::cout << "\n✅ RESULTADO: Solo páginas unpinned fueron evictadas!" << std::endl;
+        std::cout << "\n🛡️ Protección PIN-AWARE MEJORADA:" << std::endl;
+        std::cout << "✅ NUNCA evicta páginas con pin_count > 0" << std::endl;
+        std::cout << "🔄 CADA pasada decrementa pin_count automáticamente" << std::endl;
+        std::cout << "⚡ Algoritmo Clock con reference bits activo" << std::endl;
+        std::cout << "🎯 GARANTÍA: Eventualmente encuentra víctimas SIEMPRE" << std::endl;
     }
 
     /**
@@ -490,12 +430,7 @@ public:
                 }
                 
                 // Obtener reference bit del clock replacer
-                // Nota: Necesitarás agregar este método al ClockReplacer
-                if (!free_frames[i]) {
-    info.reference_bit = clock_replacer->getReferenceAt(i);
-} else {
-    info.reference_bit = false;
-}
+                info.reference_bit = clock_replacer->getReferenceAt(static_cast<int>(i));
             } else {
                 // Frame libre
                 info.page_id = -1;
@@ -524,7 +459,19 @@ private:
     }
 
     /**
-     * @brief Evicta una página usando el algoritmo Clock PIN-AWARE
+     * @brief HELPER: Sincroniza dirty bit en ambos lugares
+     */
+    void syncDirtyBit(int page_id, int frame_id, bool dirty) {
+        buffer_pool[frame_id].is_dirty = dirty;
+        if (dirty) {
+            page_table->markDirty(page_id);
+        } else {
+            page_table->clearDirty(page_id);
+        }
+    }
+
+    /**
+     * @brief Evicta una página usando el algoritmo Clock PIN-AWARE MEJORADO
      */
     int evictPage() {
         clock_sweeps++;
@@ -532,7 +479,9 @@ private:
         int victim_frame;
         if (!clock_replacer->victim(victim_frame)) {
             failed_evictions++;
-            std::cout << "❌ Clock PIN-AWARE: No se encontró víctima (todas pinned?)" << std::endl;
+            std::cout << "❌ Clock PIN-AWARE MEJORADO: No se encontró víctima" << std::endl;
+            std::cout << "   🔍 Esto NO debería ocurrir con el algoritmo MEJORADO" << std::endl;
+            std::cout << "   ⚠️  Revisar configuración MAX_PASSES o pin_count iniciales" << std::endl;
             return -1;
         }
         
@@ -551,11 +500,11 @@ private:
         int victim_page_id = buffer_pool[victim_frame].page_id;
         page_table->removePage(victim_page_id);
         
-        // Limpiar frame
-        buffer_pool[victim_frame] = ClockBufferPage();
+        // ✅ SINCRONIZACIÓN: Limpiar frame (esto resetea is_dirty automáticamente)
+        buffer_pool[victim_frame] = ClockBufferPage();  // Constructor resetea is_dirty=false
         free_frames[victim_frame] = true;
         
-        std::cout << "🎯 Clock PIN-AWARE: Frame " << victim_frame 
+        std::cout << "🎯 Clock PIN-AWARE MEJORADO: Frame " << victim_frame 
                   << " (página " << victim_page_id << ") evictado correctamente" << std::endl;
         
         return victim_frame;
