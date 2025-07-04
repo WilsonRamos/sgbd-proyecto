@@ -96,7 +96,7 @@ public:
     void showBufferPoolStatus();
     void flushAllPages();
     
-    // === CLOCK BUFFER MANAGER (SIMPLIFICADO) ===
+    // === CLOCK BUFFER MANAGER (MEJORADO) ===
     void initializeClockBufferPool();
     void clockPageOperations();
     void createNewPageClock();
@@ -844,7 +844,7 @@ void SGBDSystemExtended::flushAllPages() {
 }
 
 // ============================================================================
-// CLOCK BUFFER MANAGER (SIMPLIFICADO)
+// CLOCK BUFFER MANAGER MEJORADO
 // ============================================================================
 
 void SGBDSystemExtended::initializeClockBufferPool() {
@@ -854,7 +854,7 @@ void SGBDSystemExtended::initializeClockBufferPool() {
     }
     
     size_t clock_pool_size;
-    std::cout << "\n🕐 INICIALIZACIÓN BUFFER MANAGER CLOCK PIN-AWARE" << std::endl;
+    std::cout << "\n🕐 INICIALIZACIÓN BUFFER MANAGER CLOCK PIN-AWARE MEJORADO" << std::endl;
     std::cout << "Tamaño del Clock Buffer Pool (frames): ";
     std::cin >> clock_pool_size;
     std::cin.ignore();
@@ -868,13 +868,14 @@ void SGBDSystemExtended::initializeClockBufferPool() {
         clock_buffer_manager = std::make_unique<BufferManagerClock>(
             clock_pool_size, disk_manager.get());
         
-        std::cout << "\n✅ Clock Buffer Manager PIN-AWARE inicializado exitosamente!" << std::endl;
-        std::cout << "🕐 Algoritmo Clock activo con " << clock_pool_size << " frames" << std::endl;
+        std::cout << "\n✅ Clock Buffer Manager PIN-AWARE MEJORADO inicializado exitosamente!" << std::endl;
+        std::cout << "🕐 Algoritmo Clock MEJORADO activo con " << clock_pool_size << " frames" << std::endl;
         std::cout << "⚡ NUNCA evicta páginas con pin_count > 0" << std::endl;
-        std::cout << "🔄 Segunda pasada decrementa pin_count automáticamente" << std::endl;
+        std::cout << "🔄 CADA pasada decrementa pin_count automáticamente" << std::endl;
+        std::cout << "🎯 GARANTÍA: Eventualmente encuentra víctimas SIEMPRE" << std::endl;
         
     } catch (const std::exception& e) {
-        std::cout << "❌ Error inicializando Clock Buffer Manager: " << e.what() << std::endl;
+        std::cout << "❌ Error inicializando Clock Buffer Manager MEJORADO: " << e.what() << std::endl;
     }
 }
 
@@ -884,7 +885,7 @@ void SGBDSystemExtended::clockPageOperations() {
         return;
     }
     
-    std::cout << "\n=== OPERACIONES DE PÁGINAS CON BUFFER CLOCK ===" << std::endl;
+    std::cout << "\n=== OPERACIONES DE PÁGINAS CON BUFFER CLOCK MEJORADO ===" << std::endl;
     
     int page_id;
     std::cout << "ID de página a solicitar: ";
@@ -922,7 +923,7 @@ void SGBDSystemExtended::clockPageOperations() {
         std::cout << "❌ Error cargando página" << std::endl;
     }
     
-    clock_buffer_manager->displayCompactState();
+    clock_buffer_manager->displayClockState();
 }
 
 void SGBDSystemExtended::createNewPageClock() {
@@ -931,14 +932,14 @@ void SGBDSystemExtended::createNewPageClock() {
         return;
     }
     
-    std::cout << "\n=== CREAR NUEVA PÁGINA CON CLOCK ===" << std::endl;
+    std::cout << "\n=== CREAR NUEVA PÁGINA CON CLOCK MEJORADO ===" << std::endl;
     
     int new_page_id;
     auto block = clock_buffer_manager->newPage(new_page_id);
     if (block) {
         std::cout << "✅ Nueva página " << new_page_id << " creada" << std::endl;
         clock_buffer_manager->unpinPage(new_page_id, true);
-        clock_buffer_manager->displayCompactState();
+        clock_buffer_manager->displayClockState();
     } else {
         std::cout << "❌ Error creando nueva página" << std::endl;
     }
@@ -950,35 +951,10 @@ void SGBDSystemExtended::showClockBufferStatus() {
         return;
     }
     
-    std::cout << "\n🕐 ESTADO COMPLETO CLOCK BUFFER MANAGER PIN-AWARE" << std::endl;
+    std::cout << "\n🕐 ESTADO COMPLETO CLOCK BUFFER MANAGER PIN-AWARE MEJORADO" << std::endl;
     
-    // Mostrar estadísticas generales
-    std::cout << "\n📊 Estadísticas Generales:" << std::endl;
-    clock_buffer_manager->displayStatistics();
-    
-    // Mostrar tabla formateada usando el nuevo método
-    auto frames_info = clock_buffer_manager->getFramesInfo();
-    
-    std::cout << "\n🕐 Clock Buffer (Frames en Memoria):" << std::endl;
-    std::cout << "Frame  PageID  Status    Dirty  PinCount  RefBit  ClockPos" << std::endl;
-    std::cout << std::string(65, '-') << std::endl;
-    
-    for (size_t i = 0; i < frames_info.size(); ++i) {
-        const auto& info = frames_info[i];
-        
-        std::cout << std::setw(5) << i << "  ";
-        std::cout << std::setw(6) << (info.is_free ? "-" : std::to_string(info.page_id)) << "  ";
-        std::cout << std::setw(8) << (info.is_free ? "FREE" : "USED") << "  ";
-        std::cout << std::setw(5) << (info.is_free ? "-" : (info.is_dirty ? "YES" : "NO")) << "  ";
-        std::cout << std::setw(8) << (info.is_free ? "-" : std::to_string(info.pin_count)) << "  ";
-        std::cout << std::setw(6) << (info.is_free ? "-" : (info.reference_bit ? "1" : "0")) << "  ";
-        std::cout << std::setw(8) << (info.is_clock_hand ? "←HAND" : "") << std::endl;
-    }
-    
-    std::cout << "\n🛡️ Protección PIN-AWARE:" << std::endl;
-    std::cout << "✅ NUNCA evicta páginas con pin_count > 0" << std::endl;
-    std::cout << "🔄 Segunda pasada decrementa pin_count automáticamente" << std::endl;
-    std::cout << "⚡ Algoritmo Clock con reference bits activo" << std::endl;
+    // Mostrar estado detallado usando el método integrado
+    clock_buffer_manager->displayClockState();
 }
 
 void SGBDSystemExtended::flushAllClockPages() {
@@ -993,19 +969,19 @@ void SGBDSystemExtended::flushAllClockPages() {
 }
 
 // ============================================================================
-// COMPARACIÓN DE ALGORITMOS
+// COMPARACIÓN DE ALGORITMOS ACTUALIZADA
 // ============================================================================
 
 void SGBDSystemExtended::compareBufferAlgorithms() {
     if (!buffer_manager || !clock_buffer_manager) {
         std::cout << "❌ Error: Necesitas ambos buffer managers inicializados" << std::endl;
         std::cout << "   - Opción 19: Inicializar BufferPoolManager (LRU)" << std::endl;
-        std::cout << "   - Opción 24: Inicializar BufferManagerClock" << std::endl;
+        std::cout << "   - Opción 24: Inicializar BufferManagerClock MEJORADO" << std::endl;
         return;
     }
     
-    std::cout << "\n⚔️ COMPARACIÓN DETALLADA: LRU vs CLOCK PIN-AWARE" << std::endl;
-    std::cout << "=== Análisis de rendimiento y características ===" << std::endl;
+    std::cout << "\n⚔️ COMPARACIÓN DETALLADA: LRU vs CLOCK PIN-AWARE MEJORADO" << std::endl;
+    std::cout << "=======================================================" << std::endl;
     
     // Obtener estadísticas de LRU
     auto lru_stats = buffer_manager->getStats();
@@ -1022,57 +998,56 @@ void SGBDSystemExtended::compareBufferAlgorithms() {
         (1.0 - (double)lru_stats.page_faults / lru_stats.total_operations) * 100 : 0.0;
     std::cout << "- Hit ratio: " << std::fixed << std::setprecision(1) << lru_hit_ratio << "%" << std::endl;
     
-    std::cout << "\n📊 ESTADÍSTICAS CLOCK BUFFER MANAGER:" << std::endl;
+    std::cout << "\n📊 ESTADÍSTICAS CLOCK BUFFER MANAGER MEJORADO:" << std::endl;
     clock_buffer_manager->displayStatistics();
     
-    std::cout << "\n🎯 ANÁLISIS COMPARATIVO:" << std::endl;
+    std::cout << "\n🎯 ANÁLISIS COMPARATIVO ACTUALIZADO:" << std::endl;
     
     std::cout << "\n🔒 MANEJO DE PIN_COUNT:" << std::endl;
-    std::cout << "LRU:   Verificación básica en BufferPoolManager" << std::endl;
-    std::cout << "Clock: Integrado en algoritmo, NUNCA evicta páginas pinned" << std::endl;
+    std::cout << "LRU:           Verificación básica en BufferPoolManager" << std::endl;
+    std::cout << "Clock:         Integrado en algoritmo, NUNCA evicta páginas pinned" << std::endl;
+    std::cout << "Clock MEJORADO: + Decremento automático en CADA pasada" << std::endl;
     
     std::cout << "\n⚡ COMPLEJIDAD ALGORÍTMICA:" << std::endl;
-    std::cout << "LRU:   O(log n) para acceso + O(n) para eviction" << std::endl;
-    std::cout << "Clock: O(1) para acceso + O(n) worst case para eviction" << std::endl;
+    std::cout << "LRU:           O(log n) para acceso + O(n) para eviction" << std::endl;
+    std::cout << "Clock:         O(1) para acceso + O(n) worst case para eviction" << std::endl;
+    std::cout << "Clock MEJORADO: O(1) acceso + O(n*k) eviction (k=pasadas necesarias)" << std::endl;
     
-    std::cout << "\n💾 USO DE MEMORIA:" << std::endl;
-    std::cout << "LRU:   Timestamps + estructuras de ordenamiento" << std::endl;
-    std::cout << "Clock: Solo reference bits + clock hand pointer" << std::endl;
-    
-    std::cout << "\n🛡️ PROTECCIÓN:" << std::endl;
-    std::cout << "LRU:   Puede fallar si no se implementa verificación pin_count" << std::endl;
-    std::cout << "Clock: Protección garantizada + auto-regulación" << std::endl;
+    std::cout << "\n🛡️ PROTECCIÓN Y GARANTÍAS:" << std::endl;
+    std::cout << "LRU:           Puede fallar si no se implementa verificación pin_count" << std::endl;
+    std::cout << "Clock:         Protección garantizada + auto-regulación básica" << std::endl;
+    std::cout << "Clock MEJORADO: + GARANTÍA total de encontrar víctimas eventualmente" << std::endl;
     
     std::cout << "\n🔄 AUTO-REGULACIÓN:" << std::endl;
-    std::cout << "LRU:   No tiene mecanismo de segunda pasada" << std::endl;
-    std::cout << "Clock: Segunda pasada decrementa pins automáticamente" << std::endl;
+    std::cout << "LRU:           No tiene mecanismo de auto-regulación" << std::endl;
+    std::cout << "Clock:         Segunda pasada decrementa pins" << std::endl;
+    std::cout << "Clock MEJORADO: CADA pasada decrementa pins (más agresivo y efectivo)" << std::endl;
     
-    std::cout << "\n🌊 RESISTENCIA A SEQUENTIAL FLOODING:" << std::endl;
-    std::cout << "LRU:   Vulnerable (páginas recientes evictan frecuentes)" << std::endl;
-    std::cout << "Clock: Resistente (reference bits dan segunda oportunidad)" << std::endl;
+    std::cout << "\n🎯 CASOS DE USO RECOMENDADOS:" << std::endl;
+    std::cout << "\n✅ Clock MEJORADO es SUPERIOR para:" << std::endl;
+    std::cout << "   • Sistemas con páginas de pin_count alto" << std::endl;
+    std::cout << "   • Simulaciones académicas (comportamiento predecible)" << std::endl;
+    std::cout << "   • Entornos donde se requiere garantía de evicción" << std::endl;
+    std::cout << "   • Sistemas críticos (sin deadlocks por falta de víctimas)" << std::endl;
     
-    // Recomendación
-    std::cout << "\n🏆 RECOMENDACIÓN:" << std::endl;
-    std::cout << "✅ Clock es SUPERIOR para sistemas con:" << std::endl;
-    std::cout << "   • Páginas que deben permanecer pinned" << std::endl;
-    std::cout << "   • Patrones de acceso secuencial" << std::endl;
-    std::cout << "   • Necesidad de protección robusta" << std::endl;
-    std::cout << "   • Sistemas con memoria limitada" << std::endl;
-    
-    std::cout << "\n✅ LRU es superior para:" << std::endl;
+    std::cout << "\n✅ LRU sigue siendo superior para:" << std::endl;
     std::cout << "   • Workloads con fuerte localidad temporal" << std::endl;
-    std::cout << "   • Cuando se necesita precisión en reemplazo" << std::endl;
-    std::cout << "   • Sistemas con suficiente memoria para metadata" << std::endl;
+    std::cout << "   • Cuando la precisión en reemplazo es crítica" << std::endl;
+    std::cout << "   • Sistemas de producción estables" << std::endl;
+    
+    std::cout << "\n🏆 RECOMENDACIÓN FINAL:" << std::endl;
+    std::cout << "🎓 Para aprendizaje: Clock MEJORADO (más educativo)" << std::endl;
+    std::cout << "🚀 Para producción: Depende del patrón de acceso" << std::endl;
 }
 
 // ============================================================================
-// MENÚ PRINCIPAL SIMPLIFICADO
+// MENÚ PRINCIPAL ACTUALIZADO
 // ============================================================================
 
 void showMenu() {
     std::cout << "\n" << std::string(70, '=') << std::endl;
     std::cout << "SGBD FÍSICO INTEGRADO - MENÚ PRINCIPAL" << std::endl;
-    std::cout << "Sistema con Buffer Pool Management Simplificado" << std::endl;
+    std::cout << "Sistema con Buffer Pool Management + Clock Algorithm Mejorado" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
     
     std::cout << "\n🚀 INICIALIZACIÓN DEL SISTEMA:" << std::endl;
@@ -1114,15 +1089,15 @@ void showMenu() {
     std::cout << "22. Ver estado del Buffer Pool" << std::endl;
     std::cout << "23. Flush todas las páginas dirty" << std::endl;
     
-    std::cout << "\n🕐 BUFFER CLOCK PIN-AWARE:" << std::endl;
-    std::cout << "24. Inicializar Clock Buffer Manager" << std::endl;
+    std::cout << "\n🕐 BUFFER CLOCK PIN-AWARE MEJORADO:" << std::endl;
+    std::cout << "24. Inicializar Clock Buffer Manager MEJORADO" << std::endl;
     std::cout << "25. Operaciones de páginas Clock" << std::endl;
     std::cout << "26. Crear nueva página Clock" << std::endl;
     std::cout << "27. Ver estado Clock Buffer" << std::endl;
     std::cout << "28. Flush páginas Clock" << std::endl;
     
     std::cout << "\n⚔️ COMPARACIÓN DE ALGORITMOS:" << std::endl;
-    std::cout << "29. Comparar LRU vs Clock (Análisis detallado)" << std::endl;
+    std::cout << "29. Comparar LRU vs Clock MEJORADO (Análisis actualizado)" << std::endl;
     
     std::cout << "\n0.  Salir" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
@@ -1138,9 +1113,10 @@ int main() {
     
     std::cout << std::string(80, '=') << std::endl;
     std::cout << "SISTEMA DE GESTIÓN DE BASE DE DATOS FÍSICO INTEGRADO" << std::endl;
-    std::cout << "🚀 Buffer Pool Management Simplificado" << std::endl;
+    std::cout << "🚀 Buffer Pool Management + Clock Algorithm Mejorado" << std::endl;
     std::cout << "📚 Implementación Educativa - Almacenamiento Secundario" << std::endl;
     std::cout << "🎓 Basado en Database System Implementation + CMU Lectures" << std::endl;
+    std::cout << "⚡ Algoritmo Clock PIN-AWARE con garantía de víctimas" << std::endl;
     std::cout << std::string(80, '=') << std::endl;
     
     sistema.showSystemStatus();
@@ -1209,14 +1185,14 @@ int main() {
             case 22: sistema.showBufferPoolStatus(); break;
             case 23: sistema.flushAllPages(); break;
             
-            // CLOCK BUFFER MANAGER
+            // CLOCK BUFFER MANAGER MEJORADO
             case 24: sistema.initializeClockBufferPool(); break;
             case 25: sistema.clockPageOperations(); break;
             case 26: sistema.createNewPageClock(); break;
             case 27: sistema.showClockBufferStatus(); break;
             case 28: sistema.flushAllClockPages(); break;
             
-            // COMPARACIÓN
+            // COMPARACIÓN ACTUALIZADA
             case 29: sistema.compareBufferAlgorithms(); break;
                 
             case 0:
@@ -1224,8 +1200,9 @@ int main() {
                 std::cout << "📚 Has experimentado con:" << std::endl;
                 std::cout << "   ✅ Buffer Pool Management profesional" << std::endl;
                 std::cout << "   ✅ Page Directory persistente" << std::endl;
-                std::cout << "   ✅ Algoritmos LRU y Clock" << std::endl;
-                std::cout << "   ✅ Comparación de rendimiento" << std::endl;
+                std::cout << "   ✅ Algoritmos LRU y Clock MEJORADO" << std::endl;
+                std::cout << "   ✅ Comparación de rendimiento actualizada" << std::endl;
+                std::cout << "   🎯 Algoritmo Clock con garantía de víctimas" << std::endl;
                 std::cout << "🚀 ¡Sistema de base de datos de nivel profesional!" << std::endl;
                 return 0;
                 

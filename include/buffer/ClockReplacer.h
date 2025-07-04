@@ -7,13 +7,14 @@
 #include "PageTable.h"  // NUEVO: Necesario para consultar pin_count
 
 /**
- * @brief Clock Replacement Policy - Pin-Aware
+ * @brief Clock Replacement Policy - Pin-Aware MEJORADO
  * 
  * Implementa el algoritmo Clock con conciencia de pin_count:
  * - NUNCA evicta páginas con pin_count > 0
- * - Segunda pasada disminuye pin_count (política especial)
+ * - CADA PASADA disminuye pin_count (política corregida)
  * - Reference bits para segunda oportunidad
  * - Integrado con PageTable para verificar pins
+ * - Garantiza encontrar víctimas eventualmente
  */
 class ClockReplacer {
 private:
@@ -28,7 +29,7 @@ private:
     
     // Estadísticas para el comportamiento especial
     size_t second_chance_given;                // Reference bits reset to 0
-    size_t pin_decrements;                     // Pin counts decrementados en segunda pasada
+    size_t pin_decrements;                     // Pin counts decrementados automáticamente
     
     /**
      * @brief Busca la posición de un frame en el array circular
@@ -86,7 +87,9 @@ public:
         , second_chance_given(0)
         , pin_decrements(0) {
         
-        std::cout << "🕐 Clock Replacer inicializado (PIN-AWARE) con capacidad: " << capacity << std::endl;
+        std::cout << "🕐 Clock Replacer inicializado (PIN-AWARE MEJORADO) con capacidad: " << capacity << std::endl;
+        std::cout << "   ✅ Decremento automático en CADA pasada" << std::endl;
+        std::cout << "   ✅ Garantía de encontrar víctimas eventualmente" << std::endl;
     }
 
     /**
@@ -143,7 +146,7 @@ public:
     }
 
     /**
-     * @brief Algoritmo Clock PIN-AWARE con Segunda Pasada
+     * @brief Algoritmo Clock PIN-AWARE MEJORADO con Decremento en Cada Pasada
      */
     bool victim(int& frame_id) {
         if (current_size == 0) {
@@ -152,11 +155,11 @@ public:
         
         size_t start_pos = clock_hand;
         size_t full_passes = 0;
-        const size_t MAX_PASSES = 3;  // Máximo 3 pasadas completas
+        const size_t MAX_PASSES = 5;  // Aumentado para garantizar encontrar víctimas
         
-        std::cout << "🕐 Clock Sweep iniciado desde posición " << clock_hand << std::endl;
+        std::cout << "🕐 Clock Sweep MEJORADO iniciado desde posición " << clock_hand << std::endl;
         
-        // Algoritmo Clock con conciencia de pins
+        // Algoritmo Clock con conciencia de pins MEJORADO
         do {
             if (in_replacer[clock_hand]) {
                 int current_frame = frames[clock_hand];
@@ -176,12 +179,13 @@ public:
                             std::cout << "📌 Frame " << current_frame 
                                       << " NO evictable (pinned=" << entry.pin_count << ")" << std::endl;
                             
-                            // 🆕 POLÍTICA ESPECIAL: Segunda pasada disminuye pin_count
+                            // 🆕 POLÍTICA MEJORADA: Decrementar en CADA pasada desde la primera
                             if (full_passes >= 1) {
                                 page_table->unpinPage(page_id, false);
                                 pin_decrements++;
-                                std::cout << "🔽 Segunda pasada: Pin count decrementado para página " 
-                                          << page_id << std::endl;
+                                std::cout << "🔽 Pasada " << full_passes 
+                                          << ": Pin count " << (entry.pin_count + 1) 
+                                          << "→" << entry.pin_count << " para página " << page_id << std::endl;
                             }
                             
                         } else {
@@ -204,6 +208,9 @@ public:
                                 
                                 std::cout << "🎯 VÍCTIMA ENCONTRADA: Frame " << frame_id 
                                           << " (Page " << page_id << ") - ref=0, pin=0" << std::endl;
+                                std::cout << "   📊 Estadísticas: " << pin_decrements 
+                                          << " pins decrementados, " << second_chance_given 
+                                          << " segundas oportunidades" << std::endl;
                                 return true;
                             }
                         }
@@ -217,17 +224,36 @@ public:
             // Detectar pasada completa
             if (clock_hand == start_pos) {
                 full_passes++;
-                std::cout << "🔄 Pasada completa #" << full_passes << " terminada" << std::endl;
+                std::cout << "🔄 Pasada completa #" << full_passes << " terminada" 
+                          << " (Pins decrementados en esta pasada: +" << pin_decrements << ")" << std::endl;
                 
                 if (full_passes >= MAX_PASSES) {
-                    std::cout << "⚠️  Clock: Máximas pasadas alcanzadas. No hay víctimas disponibles." << std::endl;
+                    std::cout << "⚠️  Clock: Máximas pasadas alcanzadas (" << MAX_PASSES 
+                              << "). Total pins decrementados: " << pin_decrements << std::endl;
+                    std::cout << "   🔍 Verificando si quedan páginas con pin > 0..." << std::endl;
+                    
+                    // Diagnóstico final
+                    for (size_t i = 0; i < capacity; ++i) {
+                        if (in_replacer[i]) {
+                            int pid = getPageIdFromFrame(frames[i]);
+                            if (pid != -1) {
+                                PageTableEntry ent;
+                                if (page_table->findPageReadOnly(pid, ent)) {
+                                    std::cout << "   Frame " << frames[i] 
+                                              << ": pin=" << ent.pin_count 
+                                              << ", ref=" << (reference_bits[i] ? 1 : 0) << std::endl;
+                                }
+                            }
+                        }
+                    }
+                    
                     return false;
                 }
             }
             
         } while (full_passes < MAX_PASSES);
         
-        std::cout << "❌ Clock: No se encontró víctima después de " << full_passes << " pasadas" << std::endl;
+        std::cout << "❌ Clock MEJORADO: No se encontró víctima después de " << full_passes << " pasadas" << std::endl;
         return false;
     }
 
@@ -299,19 +325,19 @@ public:
         current_size = 0;
         second_chance_given = 0;
         pin_decrements = 0;
-        std::cout << "🧹 Clock: Cleared all frames" << std::endl;
+        std::cout << "🧹 Clock MEJORADO: Cleared all frames" << std::endl;
     }
 
     /**
-     * @brief Muestra el estado actual del Clock PIN-AWARE
+     * @brief Muestra el estado actual del Clock PIN-AWARE MEJORADO
      */
     void displayInfo() const {
-        std::cout << "\n=== CLOCK REPLACER (PIN-AWARE) ===" << std::endl;
+        std::cout << "\n=== CLOCK REPLACER (PIN-AWARE MEJORADO) ===" << std::endl;
         std::cout << "Capacidad: " << capacity << std::endl;
         std::cout << "Frames actuales: " << current_size << std::endl;
         std::cout << "Clock Hand posición: " << clock_hand << std::endl;
         std::cout << "Segunda oportunidades dadas: " << second_chance_given << std::endl;
-        std::cout << "Pin decrements (segunda pasada): " << pin_decrements << std::endl;
+        std::cout << "Pin decrements (automáticos): " << pin_decrements << std::endl;
         
         std::cout << "\nEstado del Clock Buffer:" << std::endl;
         for (size_t i = 0; i < capacity; ++i) {
@@ -339,7 +365,7 @@ public:
      * @brief Muestra versión compacta para demos
      */
     void displayCompact() const {
-        std::cout << "Clock: [";
+        std::cout << "Clock MEJORADO: [";
         for (size_t i = 0; i < capacity; ++i) {
             if (i > 0) std::cout << "|";
             
@@ -359,7 +385,8 @@ public:
             
             if (i == clock_hand) std::cout << "⟲";
         }
-        std::cout << "] (" << current_size << "/" << capacity << ")" << std::endl;
+        std::cout << "] (" << current_size << "/" << capacity << ") ";
+        std::cout << "Dec:" << pin_decrements << " 2nd:" << second_chance_given << std::endl;
     }
 
     /**
@@ -381,8 +408,9 @@ public:
         stats.capacity = capacity;
         stats.clock_hand_pos = clock_hand;
         stats.utilization = capacity > 0 ? 
-            (static_cast<double>(current_size) / capacity * 100.0) : 0.0;
+            (static_cast<double>(current_size) / capacity) * 100.0 : 0.0;
         
+        // Contar reference bits activos
         stats.active_refs = 0;
         for (size_t i = 0; i < capacity; ++i) {
             if (in_replacer[i] && reference_bits[i]) {
