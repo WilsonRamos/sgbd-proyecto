@@ -4,15 +4,16 @@
 #include <vector>
 #include <unordered_set>
 #include <iostream>
+#include "PageTable.h"  // NUEVO: Necesario para consultar pin_count
 
 /**
- * @brief Clock Replacement Policy
+ * @brief Clock Replacement Policy - Pin-Aware
  * 
- * Implementa el algoritmo Clock como aproximación de LRU:
- * - No necesita timestamps separados por página
- * - Cada página tiene un reference bit
- * - Organiza páginas en buffer circular con "clock hand"
- * - Al hacer sweep: si bit=1 → poner a 0, si bit=0 → evict
+ * Implementa el algoritmo Clock con conciencia de pin_count:
+ * - NUNCA evicta páginas con pin_count > 0
+ * - Segunda pasada disminuye pin_count (política especial)
+ * - Reference bits para segunda oportunidad
+ * - Integrado con PageTable para verificar pins
  */
 class ClockReplacer {
 private:
@@ -22,6 +23,12 @@ private:
     std::vector<bool> in_replacer;             // Track si un frame está en el replacer
     size_t clock_hand;                         // Posición actual del "clock hand"
     size_t current_size;                       // Número actual de frames en el replacer
+    
+    PageTable* page_table;                     // NUEVO: Referencia para consultar pin_count
+    
+    // Estadísticas para el comportamiento especial
+    size_t second_chance_given;                // Reference bits reset to 0
+    size_t pin_decrements;                     // Pin counts decrementados en segunda pasada
     
     /**
      * @brief Busca la posición de un frame en el array circular
@@ -46,20 +53,40 @@ private:
         }
         return -1;
     }
+    
+    /**
+     * @brief Obtiene PageID desde frame usando buffer_pool
+     */
+    int getPageIdFromFrame(int frame_id) const {
+        // Buscar en PageTable qué página está en este frame
+        auto all_pages = page_table->getAllPageIds();
+        for (int page_id : all_pages) {
+            PageTableEntry entry;
+            if (page_table->findPageReadOnly(page_id, entry)) {
+                if (entry.frame_id == frame_id && entry.valid_bit) {
+                    return page_id;
+                }
+            }
+        }
+        return -1;
+    }
 
 public:
     /**
-     * @brief Constructor
+     * @brief Constructor - NUEVO: requiere PageTable
      */
-    explicit ClockReplacer(size_t max_capacity) 
+    explicit ClockReplacer(size_t max_capacity, PageTable* pt) 
         : capacity(max_capacity)
         , frames(max_capacity, -1)
         , reference_bits(max_capacity, false)
         , in_replacer(max_capacity, false)
         , clock_hand(0)
-        , current_size(0) {
+        , current_size(0)
+        , page_table(pt)
+        , second_chance_given(0)
+        , pin_decrements(0) {
         
-        std::cout << "🕐 Clock Replacer inicializado con capacidad: " << capacity << std::endl;
+        std::cout << "🕐 Clock Replacer inicializado (PIN-AWARE) con capacidad: " << capacity << std::endl;
     }
 
     /**
@@ -116,7 +143,7 @@ public:
     }
 
     /**
-     * @brief Algoritmo Clock: busca víctima para evicción
+     * @brief Algoritmo Clock PIN-AWARE con Segunda Pasada
      */
     bool victim(int& frame_id) {
         if (current_size == 0) {
@@ -124,37 +151,84 @@ public:
         }
         
         size_t start_pos = clock_hand;
+        size_t full_passes = 0;
+        const size_t MAX_PASSES = 3;  // Máximo 3 pasadas completas
         
-        // Algoritmo Clock: sweep hasta encontrar víctima
+        std::cout << "🕐 Clock Sweep iniciado desde posición " << clock_hand << std::endl;
+        
+        // Algoritmo Clock con conciencia de pins
         do {
             if (in_replacer[clock_hand]) {
-                if (reference_bits[clock_hand]) {
-                    // Reference bit = 1, ponerlo a 0 y continuar
-                    reference_bits[clock_hand] = false;
-                    std::cout << "🕐 Clock: Frame " << frames[clock_hand] 
-                              << " ref=1→0 (segunda oportunidad)" << std::endl;
-                } else {
-                    // Reference bit = 0, víctima encontrada!
-                    frame_id = frames[clock_hand];
-                    in_replacer[clock_hand] = false;
-                    frames[clock_hand] = -1;
-                    current_size--;
-                    
-                    // Avanzar clock hand
-                    clock_hand = (clock_hand + 1) % capacity;
-                    
-                    std::cout << "🎯 Clock: Frame " << frame_id 
-                              << " seleccionado para evicción (ref=0)" << std::endl;
-                    return true;
+                int current_frame = frames[clock_hand];
+                int page_id = getPageIdFromFrame(current_frame);
+                
+                if (page_id != -1) {
+                    PageTableEntry entry;
+                    if (page_table->findPageReadOnly(page_id, entry)) {
+                        
+                        std::cout << "🔍 Evaluando Frame " << current_frame 
+                                  << " (Page " << page_id << "): "
+                                  << "pin=" << entry.pin_count 
+                                  << ", ref=" << (reference_bits[clock_hand] ? 1 : 0) << std::endl;
+                        
+                        // ✅ VERIFICACIÓN CRÍTICA: pin_count DEBE ser 0
+                        if (entry.pin_count > 0) {
+                            std::cout << "📌 Frame " << current_frame 
+                                      << " NO evictable (pinned=" << entry.pin_count << ")" << std::endl;
+                            
+                            // 🆕 POLÍTICA ESPECIAL: Segunda pasada disminuye pin_count
+                            if (full_passes >= 1) {
+                                page_table->unpinPage(page_id, false);
+                                pin_decrements++;
+                                std::cout << "🔽 Segunda pasada: Pin count decrementado para página " 
+                                          << page_id << std::endl;
+                            }
+                            
+                        } else {
+                            // pin_count == 0, verificar reference bit
+                            if (reference_bits[clock_hand]) {
+                                // Reference bit = 1, dar segunda oportunidad
+                                reference_bits[clock_hand] = false;
+                                second_chance_given++;
+                                std::cout << "🕐 Frame " << current_frame 
+                                          << " ref=1→0 (segunda oportunidad)" << std::endl;
+                            } else {
+                                // Reference bit = 0 AND pin_count = 0 → VÍCTIMA!
+                                frame_id = current_frame;
+                                in_replacer[clock_hand] = false;
+                                frames[clock_hand] = -1;
+                                current_size--;
+                                
+                                // Avanzar clock hand
+                                clock_hand = (clock_hand + 1) % capacity;
+                                
+                                std::cout << "🎯 VÍCTIMA ENCONTRADA: Frame " << frame_id 
+                                          << " (Page " << page_id << ") - ref=0, pin=0" << std::endl;
+                                return true;
+                            }
+                        }
+                    }
                 }
             }
             
             // Avanzar clock hand
             clock_hand = (clock_hand + 1) % capacity;
             
-        } while (clock_hand != start_pos);
+            // Detectar pasada completa
+            if (clock_hand == start_pos) {
+                full_passes++;
+                std::cout << "🔄 Pasada completa #" << full_passes << " terminada" << std::endl;
+                
+                if (full_passes >= MAX_PASSES) {
+                    std::cout << "⚠️  Clock: Máximas pasadas alcanzadas. No hay víctimas disponibles." << std::endl;
+                    return false;
+                }
+            }
+            
+        } while (full_passes < MAX_PASSES);
         
-        return false;  // No se encontró víctima (no debería pasar)
+        std::cout << "❌ Clock: No se encontró víctima después de " << full_passes << " pasadas" << std::endl;
+        return false;
     }
 
     /**
@@ -200,6 +274,19 @@ public:
     }
 
     /**
+     * @brief Obtiene el reference bit de un frame específico
+     */
+    bool getReferenceAt(int frame_id) const {
+        // Buscar la posición del frame en el array circular
+        for (size_t i = 0; i < capacity; ++i) {
+            if (in_replacer[i] && frames[i] == frame_id) {
+                return reference_bits[i];
+            }
+        }
+        return false; // Frame no está en el replacer
+    }
+
+    /**
      * @brief Limpia todos los frames
      */
     void clear() {
@@ -210,23 +297,35 @@ public:
         }
         clock_hand = 0;
         current_size = 0;
+        second_chance_given = 0;
+        pin_decrements = 0;
         std::cout << "🧹 Clock: Cleared all frames" << std::endl;
     }
 
     /**
-     * @brief Muestra el estado actual del Clock
+     * @brief Muestra el estado actual del Clock PIN-AWARE
      */
     void displayInfo() const {
-        std::cout << "\n=== CLOCK REPLACER ===" << std::endl;
+        std::cout << "\n=== CLOCK REPLACER (PIN-AWARE) ===" << std::endl;
         std::cout << "Capacidad: " << capacity << std::endl;
         std::cout << "Frames actuales: " << current_size << std::endl;
         std::cout << "Clock Hand posición: " << clock_hand << std::endl;
+        std::cout << "Segunda oportunidades dadas: " << second_chance_given << std::endl;
+        std::cout << "Pin decrements (segunda pasada): " << pin_decrements << std::endl;
         
         std::cout << "\nEstado del Clock Buffer:" << std::endl;
         for (size_t i = 0; i < capacity; ++i) {
             std::cout << "Pos[" << i << "]: ";
             if (in_replacer[i]) {
-                std::cout << "F" << frames[i] << "(ref=" << (reference_bits[i] ? 1 : 0) << ")";
+                int page_id = getPageIdFromFrame(frames[i]);
+                PageTableEntry entry;
+                int pin_count = 0;
+                if (page_id != -1 && page_table->findPageReadOnly(page_id, entry)) {
+                    pin_count = entry.pin_count;
+                }
+                
+                std::cout << "F" << frames[i] << "(ref=" << (reference_bits[i] ? 1 : 0) 
+                          << ",pin=" << pin_count << ")";
                 if (i == clock_hand) std::cout << " ←HAND";
             } else {
                 std::cout << "EMPTY";
@@ -245,7 +344,15 @@ public:
             if (i > 0) std::cout << "|";
             
             if (in_replacer[i]) {
-                std::cout << "F" << frames[i] << ":" << (reference_bits[i] ? 1 : 0);
+                int page_id = getPageIdFromFrame(frames[i]);
+                PageTableEntry entry;
+                int pin_count = 0;
+                if (page_id != -1 && page_table->findPageReadOnly(page_id, entry)) {
+                    pin_count = entry.pin_count;
+                }
+                
+                std::cout << "F" << frames[i] << ":" << (reference_bits[i] ? 1 : 0) 
+                          << "p" << pin_count;
             } else {
                 std::cout << "---";
             }
@@ -263,7 +370,9 @@ public:
         size_t capacity;
         size_t clock_hand_pos;
         double utilization;
-        int active_refs;  // Frames con reference_bit = 1
+        int active_refs;        // Frames con reference_bit = 1
+        size_t second_chances;  // Segunda oportunidades dadas
+        size_t pin_decrements;  // Pin counts decrementados
     };
     
     Stats getStats() const {
@@ -280,6 +389,9 @@ public:
                 stats.active_refs++;
             }
         }
+        
+        stats.second_chances = second_chance_given;
+        stats.pin_decrements = pin_decrements;
         
         return stats;
     }
