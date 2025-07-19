@@ -14,3 +14,11 @@ g++ -std=c++17 -Iinclude -Iinclude/buffer \
     main_simple.cpp -lstdc++fs -o demo_simple
 
     https://claude.ai/chat/093a1aea-29cd-4ab0-b268-e7fd2e416c22
+
+    # Compilación manual (desde PowerShell o MSYS2)
+g++ -std=c++17 -Wall -O2 -I./include -I./include/hash src/main.cpp -o bin/sgbd_fisico -lstdc++fs
+bin\sgbd_fisico.exe
+
+# Cambiar a UTF-8
+chcp 65001
+

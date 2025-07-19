@@ -1,3 +1,5 @@
 .vscode
 /bin
 /tests
+/mi_disco_sgbd
+*.exe
