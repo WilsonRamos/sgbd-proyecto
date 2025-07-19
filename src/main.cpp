@@ -8,6 +8,10 @@
 #include "../include/buffer/BufferPoolManager.h"
 #include "../include/buffer/ClockReplacer.h"
 #include "../include/buffer/BufferManagerClock.h"
+#ifdef _WIN32
+#include <windows.h>
+#include <locale>
+#endif
 
 /**
  * @brief Estado del sistema actualizado con Buffer Pool
@@ -1108,6 +1112,18 @@ void showMenu() {
  * @brief Función principal con sistema limpio y modularizado
  */
 int main() {
+    #ifdef _WIN32
+    // Configurar consola Windows para UTF-8
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    
+    // Configurar locale
+    std::locale::global(std::locale(""));
+    std::cout.imbue(std::locale());
+    #endif
+
+  
+
     SGBDSystemExtended sistema;
     int option;
     
