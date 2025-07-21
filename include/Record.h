@@ -95,6 +95,11 @@ public:
     virtual bool deserialize(const std::string& data) = 0;
 
     /**
+     * @brief Crea una copia polimórfica del registro
+     */
+    virtual std::unique_ptr<Record> clone() const = 0;
+
+    /**
      * @brief Muestra el registro en formato legible
      */
     virtual void display() const {
@@ -192,6 +197,18 @@ public:
         }
         
         return true;
+    }
+
+    /**
+     * @brief Crea una copia del registro
+     */
+    std::unique_ptr<Record> clone() const override {
+        auto cloned = std::make_unique<FixedRecord>(record_id, fixed_size);
+        cloned->schema = this->schema;
+        cloned->field_values = this->field_values;
+        cloned->is_deleted = this->is_deleted;
+        cloned->fixed_size = this->fixed_size;
+        return cloned;
     }
 };
 
@@ -313,6 +330,19 @@ public:
             std::cout << offset << " ";
         }
         std::cout << std::endl;
+    }
+
+    /**
+     * @brief Crea una copia del registro
+     */
+    std::unique_ptr<Record> clone() const override {
+        auto cloned = std::make_unique<VariableRecord>(record_id);
+        cloned->schema = this->schema;
+        cloned->field_values = this->field_values;
+        cloned->is_deleted = this->is_deleted;
+        cloned->field_offsets = this->field_offsets;
+        cloned->total_size = this->total_size;
+        return cloned;
     }
 };
 

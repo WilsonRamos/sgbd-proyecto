@@ -1,198 +1,138 @@
-# Makefile para SGBD Físico Simple
-# Compilación alternativa sin CMake
-
-# Configuración del compilador (menos estricta)
+# Makefile para SGBD con B+ Tree integrado
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -O2 -Wno-unused-parameter -Wno-sign-compare
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -g
 INCLUDES = -I./include
-LIBS = -lstdc++fs
-# Directorios
-SRC_DIR = src
-INCLUDE_DIR = include
-BUILD_DIR = build
-BIN_DIR = bin
-TEST_DIR = tests
+TARGET = demo_sgbd
+SRCDIR = .
+OBJDIR = obj
+BINDIR = bin
 
-# Archivos
-TARGET = sgbd_fisico
-MAIN_SRC = $(SRC_DIR)/main.cpp
-TEST_TARGET = test_runner
-TEST_SRC = $(TEST_DIR)/test_basic.cpp
+# Archivos fuente principales
+MAIN_SRC = demo_flujo_completo.cpp
 
-# Headers (para dependencias)
-HEADERS = $(INCLUDE_DIR)/PhysicalAddress.h \
-          $(INCLUDE_DIR)/DiskConfig.h \
-          $(INCLUDE_DIR)/Record.h \
-          $(INCLUDE_DIR)/Block.h \
-          $(INCLUDE_DIR)/FileSystemSimulator.h \
-          $(INCLUDE_DIR)/DiskManager.h \
-          $(INCLUDE_DIR)/DiskManagerExtended.h \
-          $(INCLUDE_DIR)/buffer/PageDirectory.h \
-          $(INCLUDE_DIR)/buffer/PageTable.h \
-          $(INCLUDE_DIR)/buffer/LRUReplacer.h \
-          $(INCLUDE_DIR)/buffer/ClockReplacer.h \
-          $(INCLUDE_DIR)/buffer/BufferPoolManager.h \
-          $(INCLUDE_DIR)/buffer/BufferManagerClock.h
+# Headers que necesitan ser incluidos
+HEADERS = include/QueryExecutor.h \
+          include/RecordReference.h \
+          include/BPlusTree/BPlusTree.h \
+          include/BPlusTree/BPlusNode.h \
+          include/BPlusTree/LeafNode.h \
+          include/BPlusTree/KeyComparator.h \
+          include/buffer/BufferManagerClock.h \
+          include/DiskManagerExtended.h \
+          include/Record.h \
+          include/Block.h \
+          include/PhysicalAddress.h
 
-# Detectar sistema operativo
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Linux)
-    LIBS += -pthread
-endif
-ifeq ($(UNAME_S),Darwin)
-    LIBS += -pthread
-endif
+# Crear directorios si no existen
+$(shell mkdir -p $(OBJDIR) $(BINDIR))
 
-# Targets principales
-.PHONY: all clean test install help run setup
+.PHONY: all clean run demo test help
 
-all: setup $(TARGET)
+# Objetivo principal
+all: $(BINDIR)/$(TARGET)
 
-# Compilar programa principal
-$(TARGET): $(MAIN_SRC) $(HEADERS)
-	@echo "Compilando SGBD Físico..."
-	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(MAIN_SRC) -o $(BIN_DIR)/$(TARGET) $(LIBS)
-	@echo "Compilación exitosa: $(BIN_DIR)/$(TARGET)"
+# Compilar el demo principal
+$(BINDIR)/$(TARGET): $(MAIN_SRC) $(HEADERS)
+	@echo "[*] Compilando demo integrado del SGBD..."
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $(MAIN_SRC)
+	@echo "[OK] Compilacion exitosa: $@"
 
-# Compilar tests
-test: $(TEST_TARGET)
-	@echo "Ejecutando tests..."
-	@./$(BIN_DIR)/$(TEST_TARGET)
+# Ejecutar demo
+run: $(BINDIR)/$(TARGET)
+	@echo "[*] Ejecutando demo del SGBD integrado..."
+	@echo "================================================"
+	./$(BINDIR)/$(TARGET)
 
-$(TEST_TARGET): $(TEST_SRC) $(HEADERS)
-	@echo "Compilando tests..."
-	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TEST_SRC) -o $(BIN_DIR)/$(TEST_TARGET) $(LIBS)
+# Demo específico con parámetros
+demo: $(BINDIR)/$(TARGET)
+	@echo "🎯 Ejecutando demostración completa..."
+	@echo "================================================"
+	@echo "📋 Configuración:"
+	@echo "   - B+ Tree Order: 4"
+	@echo "   - Buffer Pool: 16 frames"
+	@echo "   - Registros: Empleados (longitud fija)"
+	@echo "   - Algoritmo: Clock PIN-AWARE"
+	@echo "================================================"
+	./$(BINDIR)/$(TARGET)
 
-# Ejecutar el programa
-run: $(TARGET)
-	@echo "Ejecutando SGBD Físico..."
-	@cd $(BIN_DIR) && ./$(TARGET)
+# Compilar solo para verificar sintaxis
+test: $(MAIN_SRC) $(HEADERS)
+	@echo "🧪 Verificando sintaxis..."
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -fsyntax-only $(MAIN_SRC)
+	@echo "✅ Sintaxis correcta"
 
-# Configurar directorios y datos de prueba
-setup:
-	@echo "Configurando proyecto..."
-	@mkdir -p $(BIN_DIR)
-	@mkdir -p $(BUILD_DIR)
-	@mkdir -p $(TEST_DIR)/sample_data
-	@echo "Creando datos de prueba..."
-	@echo "Juan Perez,30,Ingeniero,75000" > $(TEST_DIR)/sample_data/empleados.csv
-	@echo "Maria Garcia,28,Analista,65000" >> $(TEST_DIR)/sample_data/empleados.csv
-	@echo "Carlos Rodriguez,35,Gerente,85000" >> $(TEST_DIR)/sample_data/empleados.csv
-	@echo "Ana Martinez,32,Desarrolladora,70000" >> $(TEST_DIR)/sample_data/empleados.csv
-	@echo "Luis Gonzalez,29,Tester,60000" >> $(TEST_DIR)/sample_data/empleados.csv
-	@echo "Laptop HP,1200.50,Computadoras,20" > $(TEST_DIR)/sample_data/productos.csv
-	@echo "Mouse Logitech,25.99,Accesorios,100" >> $(TEST_DIR)/sample_data/productos.csv
-	@echo "Monitor Dell,300.00,Pantallas,15" >> $(TEST_DIR)/sample_data/productos.csv
-	@echo "Teclado Mecánico,89.99,Accesorios,50" >> $(TEST_DIR)/sample_data/productos.csv
-	@echo "Impresora Canon,150.00,Oficina,8" >> $(TEST_DIR)/sample_data/productos.csv
+# Compilar con información de debug
+debug: CXXFLAGS += -DDEBUG -g3
+debug: $(BINDIR)/$(TARGET)
+	@echo "🐛 Versión debug compilada"
 
-# Instalar en el sistema
-install: $(TARGET)
-	@echo "Instalando en /usr/local/bin..."
-	@sudo cp $(BIN_DIR)/$(TARGET) /usr/local/bin/
-	@echo "Instalación completa. Ejecuta: sgbd_fisico"
+# Generar diagrama PlantUML (requiere plantuml instalado)
+diagram:
+	@echo "📊 Generando diagrama del flujo..."
+	@if command -v plantuml >/dev/null 2>&1; then \
+		plantuml diagrama_flujo_completo.puml; \
+		echo "✅ Diagrama generado: diagrama_flujo_completo.png"; \
+	else \
+		echo "❌ PlantUML no encontrado. Instalar con: apt install plantuml"; \
+	fi
 
-# Limpiar archivos generados
+# Limpiar archivos compilados
 clean:
-	@echo "Limpiando archivos generados..."
-	@rm -rf $(BIN_DIR)
-	@rm -rf $(BUILD_DIR)
-	@rm -rf ./mi_disco_sgbd
-	@rm -rf ./disk_simulation
-	@rm -f empleados.csv productos.csv
-	@echo "Limpieza completa."
+	@echo "🧹 Limpiando archivos compilados..."
+	rm -rf $(OBJDIR)/* $(BINDIR)/*
+	@echo "✅ Limpieza completada"
 
-# Limpiar solo ejecutables
-clean-bin:
-	@echo "Limpiando ejecutables..."
-	@rm -rf $(BIN_DIR)
-
-# Demo completo
-demo: setup $(TARGET)
-	@echo "=== DEMO DEL SGBD FÍSICO ==="
-	@echo "1. Creando datos de prueba..."
-	@cp $(TEST_DIR)/sample_data/*.csv .
-	@echo "2. Iniciando programa (usa los archivos CSV creados)"
-	@echo "3. Archivos disponibles: empleados.csv, productos.csv"
-	@echo "4. Ejecutando..."
-	@cd $(BIN_DIR) && ./$(TARGET)
-
-# Verificar dependencias
-check-deps:
-	@echo "Verificando dependencias..."
-	@which $(CXX) > /dev/null || (echo "Error: g++ no encontrado" && exit 1)
-	@echo "Compilador: $(shell $(CXX) --version | head -n1)"
-	@echo "Estándar C++17: $(shell $(CXX) -dumpversion)"
-	@echo "Sistema: $(UNAME_S)"
-	@echo "Dependencias OK"
+# Información de ayuda
+help:
+	@echo "🛠️  MAKEFILE DEL SGBD INTEGRADO"
+	@echo "=================================="
+	@echo ""
+	@echo "Objetivos disponibles:"
+	@echo "  make all      - Compilar todo"
+	@echo "  make run      - Ejecutar demo"
+	@echo "  make demo     - Ejecutar demostración completa"
+	@echo "  make test     - Verificar sintaxis"
+	@echo "  make debug    - Compilar versión debug"
+	@echo "  make diagram  - Generar diagrama PlantUML"
+	@echo "  make clean    - Limpiar archivos"
+	@echo "  make help     - Mostrar esta ayuda"
+	@echo ""
+	@echo "Estructura del proyecto:"
+	@echo "  📁 include/          - Headers (.h)"
+	@echo "  📁 include/BPlusTree/- B+ Tree headers"
+	@echo "  📁 include/buffer/   - Buffer Manager headers"
+	@echo "  📁 bin/             - Ejecutables"
+	@echo "  📁 obj/             - Objetos compilados"
+	@echo "  📄 demo_flujo_completo.cpp - Demo principal"
+	@echo ""
+	@echo "Componentes integrados:"
+	@echo "  🌳 B+ Tree          - Indexación"
+	@echo "  💾 BufferManager    - Gestión de memoria"
+	@echo "  💿 DiskManager      - Almacenamiento"
+	@echo "  🔍 QueryExecutor    - Coordinador de consultas"
+	@echo ""
 
 # Información del proyecto
 info:
-	@echo "=== INFORMACIÓN DEL PROYECTO ==="
-	@echo "Nombre: SGBD Físico Simple"
-	@echo "Versión: 1.0"
+	@echo "📋 INFORMACIÓN DEL PROYECTO"
+	@echo "============================"
+	@echo "Proyecto: SGBD con B+ Tree integrado"
+	@echo "Lenguaje: C++17"
 	@echo "Compilador: $(CXX)"
 	@echo "Flags: $(CXXFLAGS)"
-	@echo "Sistema: $(UNAME_S)"
-	@echo "Directorio de construcción: $(BIN_DIR)"
-	@echo "=== ARCHIVOS ==="
-	@echo "Ejecutable: $(BIN_DIR)/$(TARGET)"
-	@echo "Headers: $(words $(HEADERS)) archivos"
-	@echo "=== USO ==="
-	@echo "make        - Compilar proyecto"
-	@echo "make run    - Compilar y ejecutar"
-	@echo "make test   - Ejecutar tests"
-	@echo "make demo   - Demo completo"
-	@echo "make clean  - Limpiar todo"
-
-# Ayuda
-help:
-	@echo "=== SGBD FÍSICO - SISTEMA DE COMPILACIÓN ==="
 	@echo ""
-	@echo "Targets disponibles:"
-	@echo "  all          - Compilar todo (default)"
-	@echo "  run          - Compilar y ejecutar programa"
-	@echo "  test         - Compilar y ejecutar tests"
-	@echo "  demo         - Demo completo con datos de prueba"
-	@echo "  setup        - Configurar directorios y datos"
-	@echo "  install      - Instalar en el sistema"
-	@echo "  clean        - Limpiar archivos generados"
-	@echo "  clean-bin    - Limpiar solo ejecutables"
-	@echo "  check-deps   - Verificar dependencias"
-	@echo "  info         - Información del proyecto"
-	@echo "  help         - Mostrar esta ayuda"
+	@echo "Características principales:"
+	@echo "  ✅ B+ Tree como método de acceso"
+	@echo "  ✅ Buffer Manager con algoritmo Clock PIN-AWARE"
+	@echo "  ✅ Soporte para registros fijos y variables"
+	@echo "  ✅ Integración completa disco-memoria-índice"
+	@echo "  ✅ Simulación realista de SGBD"
 	@echo ""
-	@echo "Ejemplos de uso:"
-	@echo "  make run              # Compilar y ejecutar"
-	@echo "  make demo             # Demo completo"
-	@echo "  make clean && make    # Recompilar desde cero"
-	@echo ""
-	@echo "Requisitos:"
-	@echo "  - g++ con soporte C++17"
-	@echo "  - Sistema de archivos (std::filesystem)"
-	@echo "  - Linux/macOS/Windows (con MinGW)"
+	@echo "Flujo de consulta:"
+	@echo "  1️⃣  SELECT -> B+ Tree (localizar referencia)"
+	@echo "  2️⃣  B+ Tree -> BufferManager (verificar memoria)"
+	@echo "  3️⃣  BufferManager -> DiskManager (cargar si necesario)"
+	@echo "  4️⃣  Retornar registro completo"
 
-# Debug build
-debug: CXXFLAGS += -g -DDEBUG -O0
-debug: $(TARGET)
-	@echo "Compilación debug completada"
-
-# Release optimizada
-release: CXXFLAGS += -O3 -DNDEBUG
-release: $(TARGET)
-	@echo "Compilación release completada"
-
-# Análisis estático
-static-analysis:
-	@echo "Ejecutando análisis estático..."
-	@which cppcheck > /dev/null && cppcheck --enable=all $(INCLUDE_DIR) $(SRC_DIR) || echo "cppcheck no disponible"
-
-# Formatear código
-format:
-	@echo "Formateando código..."
-	@which clang-format > /dev/null && find $(INCLUDE_DIR) $(SRC_DIR) -name "*.h" -o -name "*.cpp" | xargs clang-format -i || echo "clang-format no disponible"
-
-# Target por defecto
-.DEFAULT_GOAL := all
+# Objetivo por defecto
+.DEFAULT_GOAL := help

@@ -1,0 +1,186 @@
+@startuml flujo_sgbd_completo
+!theme plain
+title Flujo Completo de Consulta en SGBD con B+ Tree
+
+actor Usuario as U
+participant "QueryExecutor" as QE
+participant "BPlusTree<String>" as BT
+participant "LeafNode" as LN
+participant "BufferManagerClock" as BM
+participant "PageTable" as PT
+participant "ClockReplacer" as CR
+participant "DiskManagerExtended" as DM
+participant "PageDirectory" as PD
+participant "Block" as BL
+participant "Record" as REC
+
+== FASE 1: CONSULTA SELECT ==
+
+U -> QE: selectRecord("12345678")
+activate QE
+
+note over QE: 🔍 Inicio de consulta SELECT\nClave: "12345678"
+
+QE -> BT: search("12345678", record_ref)
+activate BT
+
+note over BT: 📈 Búsqueda en B+ Tree\nNavegar desde raíz hasta hoja
+
+BT -> LN: search("12345678", record_ref)
+activate LN
+
+note over LN: 🔍 Búsqueda lineal en nodo hoja\nComparar claves usando KeyComparator
+
+LN --> BT: RecordReference(P0_S0_T0_SEC0, slot=2)
+deactivate LN
+
+BT --> QE: RecordReference encontrada
+deactivate BT
+
+note over QE: ✅ B+ Tree retornó referencia\nPhysicalAddress + Slot ID
+
+== FASE 2: CONSULTA AL BUFFER MANAGER ==
+
+QE -> BM: fetchPage(page_id = 0)
+activate BM
+
+note over BM: 💾 Verificar si página está en memoria
+
+BM -> PT: findPage(page_id, entry)
+activate PT
+
+alt Página en memoria (HIT)
+    PT --> BM: PageTableEntry(valid=true, frame_id=3)
+    deactivate PT
+    
+    note over BM: ✅ CACHE HIT\nPágina ya en memoria
+    
+    BM -> CR: recordAccess(frame_id=3)
+    activate CR
+    note over CR: 🕐 Actualizar reference bit\npara algoritmo Clock
+    CR --> BM: OK
+    deactivate CR
+    
+else Página no en memoria (MISS)
+    PT --> BM: PageTableEntry(valid=false)
+    deactivate PT
+    
+    note over BM: ❌ CACHE MISS\nNecesita cargar desde disco
+    
+    == SUBFASE 2.1: EVICCIÓN (si es necesario) ==
+    
+    BM -> CR: selectVictim()
+    activate CR
+    
+    note over CR: 🔄 Algoritmo Clock PIN-AWARE\nBuscar frame no anclado
+    
+    loop Hasta encontrar víctima
+        CR -> PT: getEntry(frame_id)
+        activate PT
+        PT --> CR: pin_count, reference_bit
+        deactivate PT
+        
+        alt pin_count > 0
+            note over CR: 🔒 Frame anclado\nContinuar búsqueda
+        else pin_count == 0 && reference_bit == 1
+            note over CR: 🔄 Segunda oportunidad\nReference bit = 0
+        else pin_count == 0 && reference_bit == 0
+            note over CR: 🎯 Víctima encontrada
+        end
+    end
+    
+    CR --> BM: victim_frame_id = 7
+    deactivate CR
+    
+    alt Página víctima está dirty
+        BM -> DM: writeBlock(victim_addr, block)
+        activate DM
+        note over DM: 💿 Escribir página sucia a disco
+        DM --> BM: OK
+        deactivate DM
+    end
+    
+    == SUBFASE 2.2: CARGA DESDE DISCO ==
+    
+    BM -> DM: readBlock(addr, block)
+    activate DM
+    
+    note over DM: 📀 Cargar página desde disco
+    
+    DM -> PD: findPage(page_id, location)
+    activate PD
+    
+    note over PD: 📋 Consultar Page Directory\nPhysicalAddress para page_id
+    
+    PD --> DM: PageLocation(file_id, offset)
+    deactivate PD
+    
+    DM -> BL: readFromDisk(physical_address)
+    activate BL
+    
+    note over BL: 📄 Leer bloque desde sector\nDeserializar contenido
+    
+    BL --> DM: Block con registros
+    deactivate BL
+    
+    DM --> BM: Block cargado
+    deactivate DM
+    
+    note over BM: ✅ Página cargada en frame 7
+    
+    BM -> PT: updateEntry(page_id, frame_id=7)
+    activate PT
+    note over PT: 📝 Actualizar Page Table\nvalid=true, frame_id=7
+    PT --> BM: OK
+    deactivate PT
+end
+
+BM --> QE: shared_ptr<Block>
+deactivate BM
+
+== FASE 3: EXTRACCIÓN DEL REGISTRO ==
+
+QE -> BL: getAllRecords()
+activate BL
+
+note over BL: 📋 Obtener vector de registros\nUsando offset table interna
+
+BL --> QE: vector<shared_ptr<Record>>
+deactivate BL
+
+QE -> REC: clone() [slot_id = 2]
+activate REC
+
+note over REC: 📄 Crear copia del registro\nPara retornar al usuario
+
+REC --> QE: unique_ptr<Record>
+deactivate REC
+
+== FASE 4: LIBERACIÓN DE RECURSOS ==
+
+QE -> BM: unpinPage(page_id, dirty=false)
+activate BM
+
+note over BM: 🔓 Decrementar pin_count\nPermitir futura evicción
+
+BM -> PT: decrementPin(page_id)
+activate PT
+
+note over PT: 📉 pin_count--\nPágina puede ser evictada
+
+PT --> BM: OK
+deactivate PT
+
+BM --> QE: OK
+deactivate BM
+
+QE --> U: Record completo
+deactivate QE
+
+note over U: ✅ CONSULTA COMPLETADA\nUsuario recibe registro completo
+
+== ESTADÍSTICAS ACTUALIZADAS ==
+
+note over QE: 📊 Actualizar métricas:\n- total_queries++\n- query_time\n- cache_hits/misses
+
+@enduml
