@@ -17,17 +17,7 @@
 class DiskManagerExtended : public DiskManager {
 private:
     std::unique_ptr<PageDirectory> page_directory;    // Page Directory gestionado aquí
-    // === NUEVOS MÉTODOS AUXILIARES ===
-    std::string getMetadataPath() const;
-    std::string getCurrentTimestamp() const;
-    struct RecordData {
-        int slot_id;
-        size_t size;
-        std::vector<std::string> field_values;
-    };
-    std::vector<PageLocation> getTablePages(const std::string& table_name);
-    std::vector<RecordData> parseRecordsFromBlock(const Block& block, const std::string& table_name);
-    std::vector<std::string> parseCSVLine(const std::string& line, char delimiter);
+    
     
 public:
     /**
