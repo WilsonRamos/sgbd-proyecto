@@ -14,3 +14,6 @@ g++ -std=c++17 -Iinclude -Iinclude/buffer \
     main_simple.cpp -lstdc++fs -o demo_simple
 
     https://claude.ai/chat/093a1aea-29cd-4ab0-b268-e7fd2e416c22
+
+
+    

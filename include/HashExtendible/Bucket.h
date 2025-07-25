@@ -46,7 +46,7 @@ public:
     int getLocalDepth() const { return local_depth; }
     int getSize() const { return entries.size(); }
     int getCapacity() const { return max_capacity; }
-    bool isFull() const { return entries.size() >= max_capacity; }
+    bool isFull() const { return entries.size() >= static_cast<size_t>(max_capacity); }
     bool isEmpty() const { return entries.empty(); }
     
     // Setters

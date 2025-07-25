@@ -35,7 +35,7 @@ public:
         , surfaces_per_platter(2)
         , tracks_per_surface(100)
         , sectors_per_track(100)
-        , bytes_per_sector(512)
+        , bytes_per_sector(4096)
         , seek_time_ms(6.46)
         , rotational_latency_ms(4.17)
         , transfer_time_ms(0.13)

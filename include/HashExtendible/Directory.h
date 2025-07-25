@@ -76,9 +76,9 @@ private:
     void updateDirectoryPointers(std::shared_ptr<Bucket> old_bucket, 
                                 std::shared_ptr<Bucket> new_bucket) {
         int local_depth = old_bucket->getLocalDepth();
-        int step = 1 << local_depth;
+        //int step = 1 << local_depth;
         
-        for (int i = 0; i < buckets.size(); i++) {
+        for (size_t i = 0; i < buckets.size(); i++) {
             if (buckets[i] == old_bucket) {
                 // Determinar si este índice debería apuntar al nuevo bucket
                 if ((i >> (local_depth - 1)) & 1) {
@@ -94,7 +94,7 @@ public:
         std::cout << "Profundidad Global: " << global_depth << std::endl;
         std::cout << "Número de entradas: " << buckets.size() << std::endl;
         
-        for (int i = 0; i < buckets.size(); i++) {
+        for (size_t i = 0; i < buckets.size(); i++) {
             std::cout << "Dir[" << i << "] -> ";
             buckets[i]->display();
         }
