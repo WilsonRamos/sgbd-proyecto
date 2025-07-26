@@ -4,6 +4,8 @@
 #include <string>
 #include <memory>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 #include "Directory.h"
 #include "Bucket.h"
 #include "HashFunction.h"
@@ -96,36 +98,21 @@ public:
     }
     
     /**
-     * @brief Buscar y obtener RecordReference (para integración con SGBD)
+     * @brief ✅ FUNCIÓN AGREGADA - Buscar y obtener RecordReference
      */
     bool searchReference(const std::string& key, RecordReference& record_ref) {
         search_operations++;
         
-        // FLUJO EDUCATIVO: Mostrar proceso de búsqueda
-        std::cout << "\n🔍 FLUJO DE BÚSQUEDA HASH EXTENSIBLE:" << std::endl;
-        std::cout << "1️⃣ Clave buscada: " << key << std::endl;
-        
-        // Calcular hash
-        size_t hash_value = std::hash<std::string>{}(key);
-        int global_depth = directory->getGlobalDepth();
-        size_t mask = (1 << global_depth) - 1;
-        size_t bucket_index = hash_value & mask;
-        
-        std::cout << "2️⃣ Hash calculado: " << hash_value << std::endl;
-        std::cout << "3️⃣ Profundidad global: " << global_depth << std::endl;
-        std::cout << "4️⃣ Índice de bucket: " << bucket_index << std::endl;
+        std::cout << "\n🔍 BÚSQUEDA HASH EXTENSIBLE:" << std::endl;
+        std::cout << "Clave: " << key.substr(0, 20) << "..." << std::endl;
         
         auto bucket = directory->getBucket(key);
-        std::cout << "5️⃣ Bucket localizado, buscando clave..." << std::endl;
-        
-        // Simular búsqueda en bucket
         bool found = bucket->searchReference(key, record_ref);
         
         if (found) {
-            std::cout << "6️⃣ ✅ Registro encontrado!" << std::endl;
-            std::cout << "   RecordReference: " << record_ref << std::endl;
+            std::cout << "✅ Registro encontrado" << std::endl;
         } else {
-            std::cout << "6️⃣ ❌ Registro no encontrado en bucket" << std::endl;
+            std::cout << "❌ Registro no encontrado" << std::endl;
         }
         
         return found;
@@ -144,37 +131,63 @@ public:
     }
     
     /**
-     * @brief Verifica si una inserción causará split (para mostrar progreso)
+     * @brief ✅ FUNCIÓN AGREGADA - Búsqueda con acceso a disco simulado
      */
-    bool willCauseSplit(const std::string& key) {
-        auto bucket = directory->getBucket(key);
-        return bucket->isFull();
+    bool searchWithDiskAccess(const std::string& key, RecordReference& record_ref, 
+                              std::function<bool(const RecordReference&)> disk_loader = nullptr) {
+        
+        bool found = searchReference(key, record_ref);
+        
+        if (found && disk_loader) {
+            std::cout << "🔍 Acceso a disco para cargar registro completo..." << std::endl;
+            std::cout << "   Page ID: " << record_ref.getPhysicalAddress().toString() << std::endl;
+            
+            // Simular carga desde disco
+            bool loaded = disk_loader(record_ref);
+            std::cout << "📀 Carga desde disco: " << (loaded ? "✅ Exitosa" : "❌ Falló") << std::endl;
+        }
+        
+        return found;
     }
     
     // ============================================================================
-    // ESTADÍSTICAS Y VISUALIZACIÓN
+    // ✅ FUNCIONES AGREGADAS - ESTADÍSTICAS Y VISUALIZACIÓN
     // ============================================================================
+    
+    /**
+     * @brief Obtiene estadísticas detalladas como string
+     */
+    std::string getStatistics() const {
+        std::ostringstream ss;
+        
+        ss << "=== ESTADÍSTICAS HASH EXTENSIBLE ===\n";
+        ss << "Registros totales: " << total_records << "\n";
+        ss << "Operaciones de inserción: " << insert_operations << "\n";
+        ss << "Operaciones de búsqueda: " << search_operations << "\n";
+        ss << "Divisiones de bucket: " << split_operations << "\n";
+        ss << "Profundidad global: " << directory->getGlobalDepth() << "\n";
+        ss << "Entradas en directorio: " << directory->getSize() << "\n";
+        
+        if (insert_operations > 0) {
+            double split_rate = (double)split_operations / insert_operations * 100;
+            ss << "Tasa de división: " << std::fixed << std::setprecision(2) << split_rate << "%\n";
+        }
+        
+        // Factor de carga
+        auto unique_buckets = directory->getUniqueBuckets();
+        if (!unique_buckets.empty()) {
+            double load_factor = (double)total_records / (unique_buckets.size() * bucket_capacity);
+            ss << "Factor de carga: " << std::fixed << std::setprecision(2) << load_factor << "\n";
+        }
+        
+        return ss.str();
+    }
     
     /**
      * @brief Muestra estadísticas detalladas
      */
     void displayStatistics() const {
-        std::cout << "\n📊 ESTADÍSTICAS HASH EXTENDIBLE 📊" << std::endl;
-        std::cout << "Registros totales: " << total_records << std::endl;
-        std::cout << "Operaciones de inserción: " << insert_operations << std::endl;
-        std::cout << "Operaciones de búsqueda: " << search_operations << std::endl;
-        std::cout << "Divisiones de bucket: " << split_operations << std::endl;
-        std::cout << "Profundidad global: " << directory->getGlobalDepth() << std::endl;
-        std::cout << "Entradas en directorio: " << directory->getSize() << std::endl;
-        
-        if (insert_operations > 0) {
-            std::cout << "Tasa de división: " << (double)split_operations / insert_operations * 100 << "%" << std::endl;
-        }
-        
-        // Factor de carga
-        int directory_size = directory->getSize();
-        double load_factor = (double)total_records / (directory_size * bucket_capacity);
-        std::cout << "Factor de carga: " << load_factor << std::endl;
+        std::cout << getStatistics() << std::endl;
     }
     
     /**
@@ -187,34 +200,21 @@ public:
         directory->display();
         
         std::cout << "\n📋 RESUMEN DE BUCKETS:" << std::endl;
-        int directory_size = directory->getSize();
-        for (int i = 0; i < directory_size; i++) {
-            auto bucket = directory->getBucketByIndex(i);
-            std::cout << "Entrada " << i << " -> Bucket con " 
-                      << bucket->getRecordCount() << "/" << bucket_capacity << " registros" << std::endl;
+        auto unique_buckets = directory->getUniqueBuckets();
+        for (size_t i = 0; i < unique_buckets.size(); i++) {
+            std::cout << "Bucket " << i << " -> " 
+                      << unique_buckets[i]->getRecordCount() << "/" << bucket_capacity << " registros" << std::endl;
         }
     }
     
-    // ============================================================================
-    // GETTERS PARA PERSISTENCIA
-    // ============================================================================
-    
-    size_t getTotalRecords() const { return total_records; }
-    size_t getSplitOperations() const { return split_operations; }
-    size_t getSearchOperations() const { return search_operations; }
-    int getGlobalDepth() const { return directory->getGlobalDepth(); }
-    int getBucketCapacity() const { return bucket_capacity; }
-    
     /**
-     * @brief Obtiene todas las claves para exportación (simplificado)
+     * @brief ✅ FUNCIÓN AGREGADA - Obtiene todas las claves
      */
     std::vector<std::string> getAllKeys() const {
         std::vector<std::string> keys;
+        auto unique_buckets = directory->getUniqueBuckets();
         
-        // Recorrer todos los buckets
-        int directory_size = directory->getSize();
-        for (int i = 0; i < directory_size; i++) {
-            auto bucket = directory->getBucketByIndex(i);
+        for (const auto& bucket : unique_buckets) {
             auto bucket_keys = bucket->getAllKeys();
             keys.insert(keys.end(), bucket_keys.begin(), bucket_keys.end());
         }
@@ -223,20 +223,20 @@ public:
     }
     
     /**
-     * @brief Información de distribución de buckets
+     * @brief ✅ FUNCIÓN AGREGADA - Información de distribución de buckets
      */
     std::string getBucketDistribution() const {
-        std::stringstream ss;
-        int directory_size = directory->getSize();
+        std::ostringstream ss;
+        auto unique_buckets = directory->getUniqueBuckets();
         
-        ss << "Directory Size: " << directory_size << "\n";
+        ss << "Directory Size: " << directory->getSize() << "\n";
         ss << "Global Depth: " << directory->getGlobalDepth() << "\n";
+        ss << "Unique Buckets: " << unique_buckets.size() << "\n";
         ss << "Bucket Capacity: " << bucket_capacity << "\n";
         
         // Estadísticas por bucket
         std::map<int, int> bucket_loads;
-        for (int i = 0; i < directory_size; i++) {
-            auto bucket = directory->getBucketByIndex(i);
+        for (const auto& bucket : unique_buckets) {
             int load = bucket->getRecordCount();
             bucket_loads[load]++;
         }
@@ -249,42 +249,29 @@ public:
         return ss.str();
     }
     
+    /**
+     * @brief Verifica si una inserción causará split (para mostrar progreso)
+     */
+    bool willCauseSplit(const std::string& key) {
+        auto bucket = directory->getBucket(key);
+        return bucket->isFull();
+    }
+    
     // ============================================================================
-    // BÚSQUEDAS ESPECIALES PARA INTEGRACIÓN CON SGBD
+    // GETTERS PARA PERSISTENCIA E INTEGRACIÓN
     // ============================================================================
     
+    size_t getTotalRecords() const { return total_records; }
+    size_t getSplitOperations() const { return split_operations; }
+    size_t getSearchOperations() const { return search_operations; }
+    size_t getInsertOperations() const { return insert_operations; }
+    int getGlobalDepth() const { return directory->getGlobalDepth(); }
+    int getBucketCapacity() const { return bucket_capacity; }
+    
     /**
-     * @brief Búsqueda con seguimiento de accesos al disco
+     * @brief Obtiene referencia al directorio (para persistencia avanzada)
      */
-    bool searchWithDiskAccess(const std::string& key, RecordReference& record_ref,
-                              std::function<bool(const RecordReference&)> disk_accessor) {
-        
-        std::cout << "\n🎯 BÚSQUEDA INTEGRADA HASH → DISCO:" << std::endl;
-        std::cout << "=" << std::string(40, '=') << std::endl;
-        
-        // Paso 1: Búsqueda en índice
-        if (!searchReference(key, record_ref)) {
-            std::cout << "❌ Clave no encontrada en índice hash" << std::endl;
-            return false;
-        }
-        
-        // Paso 2: Acceso al disco usando RecordReference
-        std::cout << "7️⃣ Accediendo al disco..." << std::endl;
-        std::cout << "   Page ID: " << record_ref.toPageId() << std::endl;
-        std::cout << "   Physical Address: " << record_ref.getPhysicalAddress() << std::endl;
-        std::cout << "   Slot ID: " << record_ref.getSlotId() << std::endl;
-        
-        // Llamar al accessor del disco
-        bool disk_success = disk_accessor(record_ref);
-        
-        if (disk_success) {
-            std::cout << "8️⃣ ✅ Registro recuperado exitosamente desde disco" << std::endl;
-        } else {
-            std::cout << "8️⃣ ❌ Error accediendo al registro en disco" << std::endl;
-        }
-        
-        return disk_success;
-    }
+    const Directory& getDirectory() const { return *directory; }
 };
 
 #endif // EXTENSIBLE_HASH_H

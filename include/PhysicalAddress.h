@@ -6,7 +6,7 @@
 #include <sstream>
 
 /**
- *Representa una dirección física en el disco simulado
+ * Representa una dirección física en el disco simulado
  * Estructura jerárquica: Plato -> Superficie -> Pista -> Sector
  */
 class PhysicalAddress {
@@ -76,6 +76,13 @@ public:
                surface == other.surface && 
                track == other.track && 
                sector == other.sector;
+    }
+
+    /**
+     * @brief ✅ OPERADOR DE DESIGUALDAD AGREGADO - SOLUCIONA ERROR
+     */
+    bool operator!=(const PhysicalAddress& other) const {
+        return !(*this == other);
     }
 
     /**

@@ -5,6 +5,11 @@
 #include <memory>
 #include <iostream>
 #include <cmath>
+#include <set>          
+#include <sstream>      
+#include <iomanip>      
+#include <map>
+#include <functional>
 #include "Bucket.h"
 #include "HashFunction.h"
 
@@ -57,13 +62,13 @@ public:
     }
     
     /**
-     * @brief Obtiene bucket por índice directo
+     * @brief ✅ FUNCIÓN AGREGADA - Obtiene bucket por índice
      */
-    std::shared_ptr<Bucket> getBucketByIndex(size_t index) {
-        if (index < directory.size()) {
-            return directory[index];
+    std::shared_ptr<Bucket> getBucketByIndex(int index) {
+        if (index < 0 || index >= static_cast<int>(directory.size())) {
+            return nullptr;
         }
-        return nullptr;
+        return directory[index];
     }
     
     /**
@@ -72,141 +77,115 @@ public:
     bool splitBucket(const std::string& key) {
         auto bucket = getBucket(key);
         
-        if (!bucket || !bucket->isFull()) {
-            return false;
+        if (!bucket->isFull()) {
+            return false; // No necesita división
         }
         
-        int bucket_local_depth = bucket->getLocalDepth();
+        std::cout << "🔄 Iniciando división de bucket..." << std::endl;
         
-        std::cout << "🔄 INICIANDO SPLIT DE BUCKET:" << std::endl;
-        std::cout << "   Profundidad local del bucket: " << bucket_local_depth << std::endl;
-        std::cout << "   Profundidad global: " << global_depth << std::endl;
-        
-        // Si la profundidad local es igual a la global, necesitamos doblar el directorio
-        if (bucket_local_depth == global_depth) {
-            std::cout << "   📈 Doblando directorio..." << std::endl;
-            doubleDirectory();
+        // Verificar si necesitamos expandir el directorio
+        if (bucket->getLocalDepth() == global_depth) {
+            expandDirectory();
         }
         
         // Crear nuevo bucket
-        auto new_bucket = std::make_shared<Bucket>(bucket_capacity, bucket_local_depth + 1);
-        bucket->setLocalDepth(bucket_local_depth + 1);
+        int new_local_depth = bucket->getLocalDepth() + 1;
+        auto new_bucket = std::make_shared<Bucket>(bucket_capacity, new_local_depth);
         
-        std::cout << "   🆕 Nuevo bucket creado con profundidad local: " << (bucket_local_depth + 1) << std::endl;
+        // Incrementar profundidad local del bucket original
+        bucket->incrementLocalDepth();
         
-        // Redistribuir registros entre buckets
+        // Redistribuir registros
         redistributeRecords(bucket, new_bucket);
         
         // Actualizar punteros del directorio
         updateDirectoryPointers(bucket, new_bucket);
         
-        std::cout << "   ✅ Split completado exitosamente" << std::endl;
+        std::cout << "✅ División completada exitosamente" << std::endl;
         return true;
     }
     
     /**
-     * @brief Dobla el tamaño del directorio
+     * @brief Expande el directorio duplicando su tamaño
      */
-    void doubleDirectory() {
+    void expandDirectory() {
+        std::cout << "📈 Expandiendo directorio: " << global_depth << " → " << (global_depth + 1) << std::endl;
+        
         global_depth++;
         size_t new_size = 1 << global_depth;
         
-        std::cout << "   📊 Directorio anterior: " << directory.size() << " entradas" << std::endl;
-        std::cout << "   📊 Directorio nuevo: " << new_size << " entradas" << std::endl;
-        
-        // Duplicar las entradas existentes
-        std::vector<std::shared_ptr<Bucket>> new_directory(new_size);
-        
-        for (size_t i = 0; i < directory.size(); i++) {
-            new_directory[i] = directory[i];
-            new_directory[i + directory.size()] = directory[i];
+        // Duplicar entradas existentes
+        directory.resize(new_size);
+        for (size_t i = directory_size; i < new_size; i++) {
+            directory[i] = directory[i - directory_size];
         }
         
-        directory = std::move(new_directory);
         directory_size = new_size;
         
-        std::cout << "   ✅ Directorio doblado: nueva profundidad global = " << global_depth << std::endl;
+        std::cout << "✅ Directorio expandido a tamaño: " << directory_size << std::endl;
     }
-
+    
     // ============================================================================
-    // VISUALIZACIÓN Y ESTADÍSTICAS
+    // ESTADÍSTICAS Y INFORMACIÓN
     // ============================================================================
     
     /**
-     * @brief Muestra la estructura completa del directorio
+     * @brief Muestra estructura del directorio
      */
     void display() const {
-        std::cout << "\n📁 ESTRUCTURA DEL DIRECTORIO:" << std::endl;
-        std::cout << "Profundidad global: " << global_depth << std::endl;
-        std::cout << "Tamaño del directorio: " << directory.size() << std::endl;
-        std::cout << "Capacidad por bucket: " << bucket_capacity << std::endl;
+        std::cout << "\n📁 ESTRUCTURA DEL DIRECTORIO" << std::endl;
+        std::cout << "=========================================" << std::endl;
+        std::cout << "Profundidad Global: " << global_depth << std::endl;
+        std::cout << "Tamaño Directorio: " << directory_size << std::endl;
+        std::cout << "Capacidad por Bucket: " << bucket_capacity << std::endl;
         
-        std::cout << "\n📋 MAPEO DIRECTORIO → BUCKETS:" << std::endl;
+        auto unique_buckets = getUniqueBuckets();
+        std::cout << "Buckets Únicos: " << unique_buckets.size() << std::endl;
         
-        // Agrupar entradas que apuntan al mismo bucket
-        std::map<Bucket*, std::vector<size_t>> bucket_map;
-        
-        for (size_t i = 0; i < directory.size(); i++) {
-            bucket_map[directory[i].get()].push_back(i);
+        std::cout << "\n📋 Mapeo Directorio → Buckets:" << std::endl;
+        for (size_t i = 0; i < std::min(directory.size(), size_t(16)); i++) { // Mostrar máximo 16 entradas
+            std::cout << "  [" << i << "] → Bucket@" << directory[i].get() 
+                      << " (LD:" << directory[i]->getLocalDepth() 
+                      << ", Records:" << directory[i]->getRecordCount() << ")" << std::endl;
         }
         
-        int bucket_id = 0;
-        for (const auto& pair : bucket_map) {
-            Bucket* bucket = pair.first;
-            const auto& indices = pair.second;
-            
-            std::cout << "🪣 Bucket " << bucket_id << " (prof. local: " << bucket->getLocalDepth() 
-                      << ", registros: " << bucket->getRecordCount() << "/" << bucket_capacity << ")" << std::endl;
-            
-            std::cout << "   Entradas del directorio: ";
-            for (size_t i = 0; i < indices.size(); i++) {
-                std::cout << indices[i];
-                if (i < indices.size() - 1) std::cout << ", ";
-            }
-            std::cout << std::endl;
-            
-            // Mostrar algunas claves del bucket
-            auto keys = bucket->getSampleKeys(3);
-            if (!keys.empty()) {
-                std::cout << "   Claves ejemplo: ";
-                for (size_t i = 0; i < keys.size(); i++) {
-                    std::cout << keys[i].substr(0, 15) << "...";
-                    if (i < keys.size() - 1) std::cout << ", ";
-                }
-                std::cout << std::endl;
-            }
-            
-            bucket_id++;
-            std::cout << std::endl;
+        if (directory.size() > 16) {
+            std::cout << "  ... (" << (directory.size() - 16) << " entradas más)" << std::endl;
+        }
+        
+        std::cout << "\n📊 Detalles de Buckets Únicos:" << std::endl;
+        for (size_t i = 0; i < unique_buckets.size(); i++) {
+            std::cout << "\n--- Bucket " << i << " ---" << std::endl;
+            unique_buckets[i]->display();
         }
     }
     
     /**
-     * @brief Obtiene estadísticas del directorio
+     * @brief Obtiene estadísticas detalladas
      */
     std::string getStatistics() const {
-        std::stringstream ss;
+        std::ostringstream ss;
         
-        // Contar buckets únicos
-        std::set<Bucket*> unique_buckets;
-        for (const auto& bucket : directory) {
-            unique_buckets.insert(bucket.get());
-        }
+        auto unique_buckets = getUniqueBuckets();
         
-        ss << "Directory Statistics:\n";
-        ss << "  Global Depth: " << global_depth << "\n";
-        ss << "  Directory Size: " << directory.size() << "\n";
-        ss << "  Unique Buckets: " << unique_buckets.size() << "\n";
-        ss << "  Bucket Capacity: " << bucket_capacity << "\n";
+        ss << "=== ESTADÍSTICAS DEL DIRECTORIO ===\n";
+        ss << "Profundidad Global: " << global_depth << "\n";
+        ss << "Tamaño Directorio: " << directory_size << "\n";
+        ss << "Buckets Únicos: " << unique_buckets.size() << "\n";
+        ss << "Capacidad por Bucket: " << bucket_capacity << "\n";
         
-        // Calcular factor de carga
-        int total_records = 0;
-        for (Bucket* bucket : unique_buckets) {
+        // Calcular total de registros
+        size_t total_records = 0;
+        for (const auto& bucket : unique_buckets) {
             total_records += bucket->getRecordCount();
         }
         
-        double load_factor = (double)total_records / (unique_buckets.size() * bucket_capacity);
-        ss << "  Load Factor: " << std::fixed << std::setprecision(2) << load_factor << "\n";
+        ss << "Total Registros: " << total_records << "\n";
+        
+        if (!unique_buckets.empty()) {
+            double load_factor = (double)total_records / (unique_buckets.size() * bucket_capacity);
+            ss << "Load Factor: " << std::fixed << std::setprecision(2) << load_factor << "\n";
+        }
         
         return ss.str();
     }
@@ -230,6 +209,46 @@ public:
         
         return std::vector<std::shared_ptr<Bucket>>(unique_set.begin(), unique_set.end());
     }
+    
+    // ============================================================================
+    // ✅ FUNCIÓN AGREGADA - BÚSQUEDA Y ANÁLISIS
+    // ============================================================================
+    
+    /**
+     * @brief Analiza la distribución de claves
+     */
+    std::map<std::string, int> analyzeKeyDistribution() const {
+        std::map<std::string, int> distribution;
+        auto unique_buckets = getUniqueBuckets();
+        
+        for (size_t i = 0; i < unique_buckets.size(); i++) {
+            std::string bucket_id = "bucket_" + std::to_string(i);
+            distribution[bucket_id] = unique_buckets[i]->getRecordCount();
+        }
+        
+        return distribution;
+    }
+    
+    /**
+     * @brief Verifica integridad del directorio
+     */
+    bool validateIntegrity() const {
+        // Verificar que todos los punteros son válidos
+        for (const auto& bucket : directory) {
+            if (!bucket) {
+                std::cout << "❌ Bucket nulo encontrado en directorio" << std::endl;
+                return false;
+            }
+            
+            if (!bucket->validateIntegrity()) {
+                std::cout << "❌ Bucket con integridad comprometida" << std::endl;
+                return false;
+            }
+        }
+        
+        std::cout << "✅ Integridad del directorio verificada" << std::endl;
+        return true;
+    }
 
 private:
     // ============================================================================
@@ -244,14 +263,17 @@ private:
         
         std::cout << "   🔄 Redistribuyendo registros..." << std::endl;
         
-        auto records = old_bucket->getAllRecords();
+        // Obtener todas las entradas del bucket
+        auto all_entries = old_bucket->extractAllEntries();
+        
+        // Limpiar bucket original
         old_bucket->clear();
         
         int records_in_old = 0;
         int records_in_new = 0;
         
-        for (const auto& entry : records) {
-            // Recalcular hash con nueva profundidad local
+        // Redistribuir basándose en hash con nueva profundidad local
+        for (auto& entry : all_entries) {
             size_t hash_value = std::hash<std::string>{}(entry.key);
             int new_local_depth = old_bucket->getLocalDepth();
             size_t mask = (1 << new_local_depth) - 1;
@@ -259,10 +281,10 @@ private:
             
             // El bit más significativo determina a cuál bucket va
             if (bucket_index & (1 << (new_local_depth - 1))) {
-                new_bucket->insertRecord(entry.key, entry.record);
+                new_bucket->insertRecord(entry.key, std::move(entry.record));
                 records_in_new++;
             } else {
-                old_bucket->insertRecord(entry.key, entry.record);
+                old_bucket->insertRecord(entry.key, std::move(entry.record));
                 records_in_old++;
             }
         }
@@ -282,7 +304,7 @@ private:
         int local_depth = old_bucket->getLocalDepth();
         size_t step = 1 << local_depth;
         
-        for (size_t i = 0; i < directory.size(); i += step) {
+        for (size_t i = 0; i < directory.size(); i++) {
             if (directory[i] == old_bucket) {
                 // Determinar si debe apuntar al bucket original o al nuevo
                 if (i & (1 << (local_depth - 1))) {

@@ -3,7 +3,6 @@
 
 #include <string>
 #include <functional>
-#include <iostream>
 #include <cstdint>
 
 /**
@@ -12,30 +11,57 @@
  * Proporciona diferentes algoritmos de hash optimizados para:
  * - IMEI (strings numéricos largos)
  * - Strings generales
- * - Enteros
- * - Distribución uniforme
+ * - Distribución uniforme en buckets
  */
 class HashFunction {
 public:
     /**
      * @brief Hash estándar usando std::hash
      */
-    template<typename T>
-    static size_t standardHash(const T& key) {
-        return std::hash<T>{}(key);
+    static size_t standardHash(const std::string& key) {
+        return std::hash<std::string>{}(key);
     }
     
     /**
-     * @brief Hash específico para IMEI (mejor distribución)
+     * @brief Hash optimizado para IMEI (15 dígitos)
+     * Usa características específicas de IMEI para mejor distribución
      */
-    static size_t hashIMEI(const std::string& imei) {
-        // Algoritmo FNV-1a optimizado para números largos
+    static size_t imeiHash(const std::string& imei) {
+        if (imei.length() < 10) {
+            return standardHash(imei);
+        }
+        
+        // Combinar diferentes partes del IMEI
+        uint64_t hash = 0;
+        
+        // Parte 1: TAC (Type Allocation Code) - primeros 8 dígitos
+        for (int i = 0; i < 8 && i < imei.length(); i++) {
+            hash = hash * 31 + (imei[i] - '0');
+        }
+        
+        // Parte 2: SNR (Serial Number) - siguientes 6 dígitos
+        for (int i = 8; i < 14 && i < imei.length(); i++) {
+            hash = hash * 37 + (imei[i] - '0');
+        }
+        
+        // Parte 3: Check digit (último dígito)
+        if (imei.length() >= 15) {
+            hash = hash * 41 + (imei[14] - '0');
+        }
+        
+        return static_cast<size_t>(hash);
+    }
+    
+    /**
+     * @brief Hash Fowler-Noll-Vo (FNV-1a) - distribución uniforme
+     */
+    static size_t fnvHash(const std::string& key) {
         const uint64_t FNV_OFFSET_BASIS = 14695981039346656037ULL;
         const uint64_t FNV_PRIME = 1099511628211ULL;
         
         uint64_t hash = FNV_OFFSET_BASIS;
         
-        for (char c : imei) {
+        for (char c : key) {
             hash ^= static_cast<uint64_t>(c);
             hash *= FNV_PRIME;
         }
@@ -44,340 +70,120 @@ public:
     }
     
     /**
-     * @brief Hash para strings con mejor distribución
+     * @brief Hash MurmurHash3 simplificado - alta calidad
      */
-    static size_t hashString(const std::string& str) {
-        // Algoritmo djb2 con variaciones
-        uint64_t hash = 5381;
+    static size_t murmurHash(const std::string& key) {
+        const uint32_t seed = 0x9747b28c;
+        const uint32_t m = 0x5bd1e995;
+        const int r = 24;
         
-        for (char c : str) {
-            hash = ((hash << 5) + hash) + static_cast<uint64_t>(c);
+        uint32_t len = static_cast<uint32_t>(key.length());
+        uint32_t h = seed ^ len;
+        
+        const unsigned char* data = reinterpret_cast<const unsigned char*>(key.c_str());
+        
+        while (len >= 4) {
+            uint32_t k = *(uint32_t*)data;
+            
+            k *= m;
+            k ^= k >> r;
+            k *= m;
+            
+            h *= m;
+            h ^= k;
+            
+            data += 4;
+            len -= 4;
         }
         
-        return static_cast<size_t>(hash);
-    }
-    
-    /**
-     * @brief Hash para enteros con multiplicación
-     */
-    static size_t hashInteger(int key) {
-        // Multiplicación por número primo grande
-        uint64_t hash = static_cast<uint64_t>(key);
-        hash *= 2654435761ULL; // Número primo
-        return static_cast<size_t>(hash);
-    }
-    
-    /**
-     * @brief Hash híbrido que detecta el tipo de dato
-     */
-    static size_t hybridHash(const std::string& key) {
-        if (isNumeric(key)) {
-            if (key.length() >= 14) {
-                // Parece un IMEI
-                return hashIMEI(key);
-            } else {
-                // Número regular
-                try {
-                    int num = std::stoi(key);
-                    return hashInteger(num);
-                } catch (...) {
-                    return hashString(key);
-                }
-            }
-        } else {
-            // String normal
-            return hashString(key);
+        // Handle remaining bytes
+        switch (len) {
+            case 3: h ^= data[2] << 16;
+            case 2: h ^= data[1] << 8;
+            case 1: h ^= data[0];
+                    h *= m;
         }
+        
+        h ^= h >> 13;
+        h *= m;
+        h ^= h >> 15;
+        
+        return static_cast<size_t>(h);
     }
-
-    // ============================================================================
-    // FUNCIONES PARA HASH EXTENSIBLE
-    // ============================================================================
     
     /**
-     * @brief Calcula hash con máscara para profundidad específica
+     * @brief Hash con máscara para profundidad específica
      */
     static size_t hashWithDepth(const std::string& key, int depth) {
-        size_t hash_value = hybridHash(key);
-        size_t mask = (1ULL << depth) - 1;
-        return hash_value & mask;
+        size_t hash = fnvHash(key);
+        size_t mask = (1 << depth) - 1;  // Máscara de 'depth' bits
+        return hash & mask;
     }
     
     /**
-     * @brief Obtiene los últimos N bits del hash
+     * @brief Hash para distribución en directorio de Hash Extensible
      */
-    static size_t getLastNBits(const std::string& key, int n) {
-        return hashWithDepth(key, n);
+    static size_t directoryHash(const std::string& key, int global_depth) {
+        return hashWithDepth(key, global_depth);
     }
     
     /**
-     * @brief Verifica si dos claves van al mismo bucket
+     * @brief Hash para comparación y debugging
      */
-    static bool sameBucket(const std::string& key1, const std::string& key2, int depth) {
-        return hashWithDepth(key1, depth) == hashWithDepth(key2, depth);
-    }
-    
-    /**
-     * @brief Calcula la distribución de hash para análisis
-     */
-    static void analyzeDistribution(const std::vector<std::string>& keys, int depth) {
-        std::cout << "\n📊 ANÁLISIS DE DISTRIBUCIÓN HASH:" << std::endl;
-        std::cout << "Profundidad: " << depth << std::endl;
-        std::cout << "Claves analizadas: " << keys.size() << std::endl;
+    static std::string hashInfo(const std::string& key) {
+        std::string info = "Hash info for '" + key.substr(0, 20) + "':\n";
+        info += "  Standard: " + std::to_string(standardHash(key)) + "\n";
+        info += "  FNV-1a:   " + std::to_string(fnvHash(key)) + "\n";
+        info += "  Murmur:   " + std::to_string(murmurHash(key)) + "\n";
         
-        std::map<size_t, int> distribution;
-        size_t total_buckets = 1ULL << depth;
+        if (key.length() >= 10 && std::all_of(key.begin(), key.end(), ::isdigit)) {
+            info += "  IMEI:     " + std::to_string(imeiHash(key)) + "\n";
+        }
+        
+        return info;
+    }
+    
+    /**
+     * @brief Verifica calidad de distribución para un conjunto de claves
+     */
+    static double calculateDistributionQuality(const std::vector<std::string>& keys, int num_buckets) {
+        std::vector<int> bucket_counts(num_buckets, 0);
         
         for (const auto& key : keys) {
-            size_t bucket = hashWithDepth(key, depth);
-            distribution[bucket]++;
+            size_t hash = fnvHash(key);
+            int bucket = hash % num_buckets;
+            bucket_counts[bucket]++;
         }
         
-        std::cout << "Buckets utilizados: " << distribution.size() << "/" << total_buckets << std::endl;
+        // Calcular desviación estándar de la distribución
+        double mean = static_cast<double>(keys.size()) / num_buckets;
+        double variance = 0.0;
         
-        // Estadísticas de distribución
-        int min_load = INT_MAX;
-        int max_load = 0;
-        double sum_squares = 0;
-        
-        for (size_t i = 0; i < total_buckets; i++) {
-            int load = distribution[i];
-            min_load = std::min(min_load, load);
-            max_load = std::max(max_load, load);
-            sum_squares += load * load;
+        for (int count : bucket_counts) {
+            double diff = count - mean;
+            variance += diff * diff;
         }
         
-        double mean = static_cast<double>(keys.size()) / total_buckets;
-        double variance = (sum_squares / total_buckets) - (mean * mean);
-        double std_dev = std::sqrt(variance);
+        variance /= num_buckets;
+        double stddev = std::sqrt(variance);
         
-        std::cout << "Estadísticas de carga:" << std::endl;
-        std::cout << "  Mínima: " << min_load << std::endl;
-        std::cout << "  Máxima: " << max_load << std::endl;
-        std::cout << "  Promedio: " << std::fixed << std::setprecision(2) << mean << std::endl;
-        std::cout << "  Desviación estándar: " << std::fixed << std::setprecision(2) << std_dev << std::endl;
-        
-        // Factor de uniformidad (menor es mejor)
-        double uniformity = std_dev / mean;
-        std::cout << "  Factor de uniformidad: " << std::fixed << std::setprecision(3) << uniformity << std::endl;
-        
-        if (uniformity < 0.2) {
-            std::cout << "  ✅ Distribución excelente" << std::endl;
-        } else if (uniformity < 0.5) {
-            std::cout << "  ✅ Distribución buena" << std::endl;
-        } else if (uniformity < 1.0) {
-            std::cout << "  ⚠️ Distribución aceptable" << std::endl;
-        } else {
-            std::cout << "  ❌ Distribución pobre" << std::endl;
-        }
-    }
-
-    // ============================================================================
-    // UTILIDADES Y DEBUGGING
-    // ============================================================================
-    
-    /**
-     * @brief Muestra información de hash para una clave
-     */
-    static void debugHash(const std::string& key, int max_depth = 4) {
-        std::cout << "\n🔍 DEBUG HASH PARA CLAVE: '" << key << "'" << std::endl;
-        std::cout << "Tipo detectado: " << (isNumeric(key) ? "Numérico" : "String") << std::endl;
-        
-        if (isNumeric(key) && key.length() >= 14) {
-            std::cout << "Subtipo: IMEI" << std::endl;
-        }
-        
-        size_t base_hash = hybridHash(key);
-        std::cout << "Hash base: " << base_hash << " (0x" << std::hex << base_hash << std::dec << ")" << std::endl;
-        
-        std::cout << "Buckets por profundidad:" << std::endl;
-        for (int depth = 0; depth <= max_depth; depth++) {
-            size_t bucket = hashWithDepth(key, depth);
-            size_t total_buckets = 1ULL << depth;
-            std::cout << "  Profundidad " << depth << ": bucket " << bucket 
-                      << " de " << total_buckets << " (" 
-                      << std::fixed << std::setprecision(1) 
-                      << (100.0 * bucket / total_buckets) << "%)" << std::endl;
-        }
-        
-        // Mostrar representación binaria
-        std::cout << "Bits del hash: ";
-        for (int i = max_depth - 1; i >= 0; i--) {
-            size_t bit = (base_hash >> i) & 1;
-            std::cout << bit;
-        }
-        std::cout << std::endl;
-    }
-    
-    /**
-     * @brief Compara diferentes algoritmos de hash
-     */
-    static void compareHashAlgorithms(const std::string& key) {
-        std::cout << "\n🆚 COMPARACIÓN DE ALGORITMOS HASH:" << std::endl;
-        std::cout << "Clave: '" << key << "'" << std::endl;
-        
-        size_t std_hash = standardHash(key);
-        size_t str_hash = hashString(key);
-        size_t hyb_hash = hybridHash(key);
-        
-        std::cout << "std::hash: " << std_hash << std::endl;
-        std::cout << "hashString: " << str_hash << std::endl;
-        std::cout << "hybridHash: " << hyb_hash << std::endl;
-        
-        if (isNumeric(key) && key.length() >= 14) {
-            size_t imei_hash = hashIMEI(key);
-            std::cout << "hashIMEI: " << imei_hash << std::endl;
-        }
-        
-        // Comparar distribución en primeros 4 bits
-        std::cout << "\nPrimeros 4 bits:" << std::endl;
-        std::cout << "std::hash: " << (std_hash & 15) << std::endl;
-        std::cout << "hashString: " << (str_hash & 15) << std::endl;
-        std::cout << "hybridHash: " << (hyb_hash & 15) << std::endl;
-    }
-    
-    /**
-     * @brief Genera claves de prueba para testing
-     */
-    static std::vector<std::string> generateTestKeys(int count = 1000) {
-        std::vector<std::string> keys;
-        keys.reserve(count);
-        
-        // Base IMEI
-        std::string base_imei = "86801807023740";
-        
-        for (int i = 0; i < count; i++) {
-            // Generar variaciones del IMEI
-            std::string imei = base_imei + std::to_string(i % 100);
-            if (imei.length() > 15) {
-                imei = imei.substr(0, 15);
-            }
-            keys.push_back(imei);
-        }
-        
-        return keys;
-    }
-    
-    /**
-     * @brief Test de calidad del hash
-     */
-    static void testHashQuality(int sample_size = 10000) {
-        std::cout << "\n🧪 TEST DE CALIDAD DE HASH:" << std::endl;
-        std::cout << "Generando " << sample_size << " claves de prueba..." << std::endl;
-        
-        auto test_keys = generateTestKeys(sample_size);
-        
-        for (int depth = 1; depth <= 4; depth++) {
-            std::cout << "\n--- Profundidad " << depth << " ---" << std::endl;
-            analyzeDistribution(test_keys, depth);
-        }
-    }
-
-private:
-    /**
-     * @brief Verifica si un string es numérico
-     */
-    static bool isNumeric(const std::string& str) {
-        if (str.empty()) return false;
-        
-        for (char c : str) {
-            if (!std::isdigit(c)) return false;
-        }
-        
-        return true;
+        // Retornar coeficiente de variación (lower is better)
+        return stddev / mean;
     }
 };
-
-// ============================================================================
-// CLASE PARA HASH PERSONALIZADO (OPCIONAL)
-// ============================================================================
 
 /**
- * @brief Hash personalizable para diferentes casos de uso
+ * @brief Función hash por defecto para Hash Extensible
  */
-template<typename KeyType>
-class CustomHashFunction {
-private:
-    std::function<size_t(const KeyType&)> hash_func;
-    std::string algorithm_name;
-
-public:
-    CustomHashFunction(std::function<size_t(const KeyType&)> func, 
-                      const std::string& name = "Custom") 
-        : hash_func(func), algorithm_name(name) {}
-    
-    size_t operator()(const KeyType& key) const {
-        return hash_func(key);
-    }
-    
-    const std::string& getName() const {
-        return algorithm_name;
-    }
-    
-    void benchmark(const std::vector<KeyType>& keys) {
-        auto start = std::chrono::high_resolution_clock::now();
-        
-        for (const auto& key : keys) {
-            volatile size_t hash = hash_func(key); // volatile para evitar optimización
-            (void)hash; // Suprimir warning
-        }
-        
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-        
-        std::cout << "⏱️ " << algorithm_name << ": " << duration.count() 
-                  << " μs para " << keys.size() << " hashes" << std::endl;
-        std::cout << "   Promedio: " << (double)duration.count() / keys.size() 
-                  << " μs/hash" << std::endl;
-    }
-};
-
-// ============================================================================
-// FACTORY DE FUNCIONES HASH
-// ============================================================================
+inline size_t defaultExtensibleHash(const std::string& key) {
+    return HashFunction::fnvHash(key);
+}
 
 /**
- * @brief Factory para crear diferentes tipos de funciones hash
+ * @brief Función hash especializada para IMEI
  */
-class HashFunctionFactory {
-public:
-    enum class HashType {
-        STANDARD,
-        STRING_OPTIMIZED,
-        IMEI_OPTIMIZED,
-        HYBRID,
-        CUSTOM
-    };
-    
-    static std::function<size_t(const std::string&)> create(HashType type) {
-        switch (type) {
-            case HashType::STANDARD:
-                return [](const std::string& key) { return HashFunction::standardHash(key); };
-            
-            case HashType::STRING_OPTIMIZED:
-                return [](const std::string& key) { return HashFunction::hashString(key); };
-            
-            case HashType::IMEI_OPTIMIZED:
-                return [](const std::string& key) { return HashFunction::hashIMEI(key); };
-            
-            case HashType::HYBRID:
-                return [](const std::string& key) { return HashFunction::hybridHash(key); };
-            
-            default:
-                return [](const std::string& key) { return HashFunction::hybridHash(key); };
-        }
-    }
-    
-    static std::string getTypeName(HashType type) {
-        switch (type) {
-            case HashType::STANDARD: return "Standard";
-            case HashType::STRING_OPTIMIZED: return "String Optimized";
-            case HashType::IMEI_OPTIMIZED: return "IMEI Optimized";
-            case HashType::HYBRID: return "Hybrid";
-            case HashType::CUSTOM: return "Custom";
-            default: return "Unknown";
-        }
-    }
-};
+inline size_t imeiExtensibleHash(const std::string& imei) {
+    return HashFunction::imeiHash(imei);
+}
 
 #endif // HASH_FUNCTION_H

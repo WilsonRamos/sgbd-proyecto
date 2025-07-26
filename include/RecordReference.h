@@ -3,136 +3,267 @@
 
 #include "PhysicalAddress.h"
 #include <iostream>
+#include <string>
+#include <sstream>
 
 /**
- * @brief Referencia ligera a un registro almacenado en disco
+ * @brief Referencia ligera a un registro en disco
  * 
- * Utilizada por los índices para evitar almacenar registros completos.
- * Contiene información suficiente para localizar y cargar el registro desde disco.
+ * En lugar de cargar registros completos en índices,
+ * utilizamos referencias que apuntan a la ubicación física
  */
 class RecordReference {
 private:
-    PhysicalAddress physical_address;  // Dirección física en disco
-    int slot_id;                      // ID del slot dentro de la página
-    size_t record_size;               // Tamaño del registro (para validación)
-    bool is_valid;                    // Flag de validez
+    PhysicalAddress physical_address;
+    int slot_id;                    // ID del slot dentro del bloque
+    bool is_valid;                  // Indica si la referencia es válida
 
 public:
     /**
-     * @brief Constructor por defecto
+     * @brief Constructor por defecto - referencia inválida
      */
-    RecordReference() : slot_id(-1), record_size(0), is_valid(false) {}
+    RecordReference() : slot_id(-1), is_valid(false) {}
     
     /**
-     * @brief Constructor con parámetros
+     * @brief Constructor con dirección física y slot
      */
-    RecordReference(const PhysicalAddress& addr, int slot, size_t size = 0) 
-        : physical_address(addr), slot_id(slot), record_size(size), is_valid(true) {}
+    RecordReference(const PhysicalAddress& addr, int slot) 
+        : physical_address(addr), slot_id(slot), is_valid(true) {}
     
-    // Getters
+    // ============================================================================
+    // GETTERS
+    // ============================================================================
+    
     const PhysicalAddress& getPhysicalAddress() const { return physical_address; }
     int getSlotId() const { return slot_id; }
-    size_t getRecordSize() const { return record_size; }
     bool isValid() const { return is_valid; }
     
-    // Setters
-    void setPhysicalAddress(const PhysicalAddress& addr) { 
-        physical_address = addr; 
-        is_valid = true;
+    // ============================================================================
+    // ✅ FUNCIÓN AGREGADA - CONVERSIÓN A PAGE ID
+    // ============================================================================
+    
+    /**
+     * @brief Convierte la dirección física a un Page ID único
+     */
+    int toPageId() const {
+        if (!is_valid) {
+            return -1;
+        }
+        
+        // Combinar componentes de la dirección física para crear un ID único
+        // Esto es una simplificación educativa
+        int page_id = physical_address.getPlatter() * 1000000 +
+                      physical_address.getSurface() * 100000 +
+                      physical_address.getTrack() * 1000 +
+                      physical_address.getSector();
+        
+        return page_id;
     }
     
-    void setSlotId(int slot) { slot_id = slot; }
-    void setRecordSize(size_t size) { record_size = size; }
+    /**
+     * @brief ✅ FUNCIÓN AGREGADA - Convierte a Page ID con offset
+     */
+    std::pair<int, int> toPageIdWithOffset() const {
+        int page_id = toPageId();
+        return std::make_pair(page_id, slot_id);
+    }
+    
+    // ============================================================================
+    // OPERACIONES
+    // ============================================================================
+    
+    /**
+     * @brief Marca la referencia como inválida
+     */
     void invalidate() { is_valid = false; }
     
     /**
-     * @brief Convierte a page_id para BufferManager
-     * 
-     * Necesario para mapear entre PhysicalAddress y el sistema de páginas del BufferManager
+     * @brief Actualiza la referencia
      */
-    int toPageId() const {
-        if (!is_valid) return -1;
-        
-        // Generar page_id único basado en la dirección física
-        return physical_address.getPlatter() * 10000 + 
-               physical_address.getSurface() * 1000 + 
-               physical_address.getTrack() * 100 + 
-               physical_address.getSector();
+    void update(const PhysicalAddress& addr, int slot) {
+        physical_address = addr;
+        slot_id = slot;
+        is_valid = true;
     }
     
     /**
-     * @brief Crea RecordReference desde page_id
+     * @brief ✅ FUNCIÓN AGREGADA - Actualiza desde Page ID
      */
-    static RecordReference fromPageId(int page_id, int slot_id) {
-        // Decodificar page_id de vuelta a componentes físicos
-        int platter = page_id / 10000;
-        int surface = (page_id % 10000) / 1000;
-        int track = (page_id % 1000) / 100;
-        int sector = page_id % 100;
-        
-        PhysicalAddress addr(platter, surface, track, sector);
-        return RecordReference(addr, slot_id);
-    }
-    
-    /**
-     * @brief Serialización para persistencia
-     */
-    std::string serialize() const {
-        return physical_address.toString() + "|" + 
-               std::to_string(slot_id) + "|" + 
-               std::to_string(record_size) + "|" + 
-               (is_valid ? "1" : "0");
-    }
-    
-    /**
-     * @brief Deserialización
-     */
-    bool deserialize(const std::string& data) {
-        size_t pos1 = data.find('|');
-        size_t pos2 = data.find('|', pos1 + 1);
-        size_t pos3 = data.find('|', pos2 + 1);
-        
-        if (pos1 == std::string::npos || pos2 == std::string::npos || pos3 == std::string::npos) {
-            return false;
+    void updateFromPageId(int page_id, int slot) {
+        if (page_id < 0) {
+            invalidate();
+            return;
         }
         
-        // No implementamos physical_address.fromString() por simplicidad
-        slot_id = std::stoi(data.substr(pos1 + 1, pos2 - pos1 - 1));
-        record_size = std::stoull(data.substr(pos2 + 1, pos3 - pos2 - 1));
-        is_valid = (data.substr(pos3 + 1) == "1");
+        // Descomponer Page ID en componentes de dirección física
+        int platter = page_id / 1000000;
+        int surface = (page_id % 1000000) / 100000;
+        int track = (page_id % 100000) / 1000;
+        int sector = page_id % 1000;
         
-        return true;
+        physical_address = PhysicalAddress(platter, surface, track, sector);
+        slot_id = slot;
+        is_valid = true;
     }
     
-    /**
-     * @brief Operador de comparación para ordenamiento
-     */
+    // ============================================================================
+    // OPERADORES
+    // ============================================================================
+    
+    bool operator==(const RecordReference& other) const {
+        return is_valid && other.is_valid && 
+               physical_address.toString() == other.physical_address.toString() && 
+               slot_id == other.slot_id;
+    }
+    
+    bool operator!=(const RecordReference& other) const {
+        return !(*this == other);
+    }
+    
     bool operator<(const RecordReference& other) const {
+        if (!is_valid && !other.is_valid) return false;
+        if (!is_valid) return true;
+        if (!other.is_valid) return false;
+        
+        // ✅ USAR toString() EN LUGAR DE operator!= para evitar problemas
         if (physical_address.toString() != other.physical_address.toString()) {
             return physical_address.toString() < other.physical_address.toString();
         }
         return slot_id < other.slot_id;
     }
     
-    bool operator==(const RecordReference& other) const {
-        return physical_address.toString() == other.physical_address.toString() && 
-               slot_id == other.slot_id;
+    // ============================================================================
+    // SERIALIZACIÓN Y DEBUG
+    // ============================================================================
+    
+    /**
+     * @brief Convierte a string para depuración
+     */
+    std::string toString() const {
+        if (!is_valid) {
+            return "RecordReference(INVALID)";
+        }
+        
+        std::ostringstream ss;
+        ss << "RecordReference(PageID:" << toPageId() 
+           << ", " << physical_address.toString() 
+           << ", slot:" << slot_id << ")";
+        return ss.str();
     }
     
     /**
-     * @brief Display para debugging
+     * @brief ✅ FUNCIÓN AGREGADA - Información detallada
      */
-    void display() const {
-        std::cout << "RecordRef[" << physical_address.toString() 
-                  << ", slot=" << slot_id 
-                  << ", size=" << record_size 
-                  << ", valid=" << (is_valid ? "YES" : "NO") << "]";
+    std::string getDetailedInfo() const {
+        std::ostringstream ss;
+        ss << "=== RECORD REFERENCE INFO ===\n";
+        ss << "Valid: " << (is_valid ? "Yes" : "No") << "\n";
+        
+        if (is_valid) {
+            ss << "Page ID: " << toPageId() << "\n";
+            ss << "Physical Address: " << physical_address.toString() << "\n";
+            ss << "Slot ID: " << slot_id << "\n";
+            ss << "Platter: " << physical_address.getPlatter() << "\n";
+            ss << "Surface: " << physical_address.getSurface() << "\n";
+            ss << "Track: " << physical_address.getTrack() << "\n";
+            ss << "Sector: " << physical_address.getSector() << "\n";
+        }
+        
+        return ss.str();
     }
     
+    /**
+     * @brief Operador de salida para debug
+     */
     friend std::ostream& operator<<(std::ostream& os, const RecordReference& ref) {
-        os << "RecordRef[" << ref.physical_address.toString() 
-           << ", slot=" << ref.slot_id << "]";
+        os << ref.toString();
         return os;
+    }
+    
+    // ============================================================================
+    // ✅ FUNCIONES AGREGADAS - UTILIDADES PARA BUFFER POOL
+    // ============================================================================
+    
+    /**
+     * @brief Verifica si la referencia apunta a la misma página que otra
+     */
+    bool samePage(const RecordReference& other) const {
+        return is_valid && other.is_valid && 
+               physical_address.toString() == other.physical_address.toString();
+    }
+    
+    /**
+     * @brief Calcula distancia en disco respecto a otra referencia
+     */
+    int diskDistance(const RecordReference& other) const {
+        if (!is_valid || !other.is_valid) {
+            return -1;
+        }
+        
+        // Simplificación: distancia basada en diferencia de sectores
+        return abs(toPageId() - other.toPageId());
+    }
+    
+    /**
+     * @brief Verifica si la referencia está en un rango específico
+     */
+    bool inRange(const RecordReference& start, const RecordReference& end) const {
+        if (!is_valid || !start.is_valid || !end.is_valid) {
+            return false;
+        }
+        
+        std::string my_addr = physical_address.toString();
+        std::string start_addr = start.physical_address.toString();
+        std::string end_addr = end.physical_address.toString();
+        
+        return my_addr >= start_addr && my_addr <= end_addr;
+    }
+    
+    /**
+     * @brief Serializa la referencia para persistencia
+     */
+    std::string serialize() const {
+        std::ostringstream ss;
+        ss << is_valid << "|" 
+           << physical_address.getPlatter() << "|"
+           << physical_address.getSurface() << "|"
+           << physical_address.getTrack() << "|"
+           << physical_address.getSector() << "|"
+           << slot_id;
+        return ss.str();
+    }
+    
+    /**
+     * @brief Deserializa la referencia desde string
+     */
+    bool deserialize(const std::string& data) {
+        std::istringstream ss(data);
+        std::string token;
+        std::vector<std::string> tokens;
+        
+        while (std::getline(ss, token, '|')) {
+            tokens.push_back(token);
+        }
+        
+        if (tokens.size() != 6) {
+            return false;
+        }
+        
+        try {
+            is_valid = (tokens[0] == "1");
+            int platter = std::stoi(tokens[1]);
+            int surface = std::stoi(tokens[2]);
+            int track = std::stoi(tokens[3]);
+            int sector = std::stoi(tokens[4]);
+            slot_id = std::stoi(tokens[5]);
+            
+            physical_address = PhysicalAddress(platter, surface, track, sector);
+            return true;
+            
+        } catch (const std::exception&) {
+            is_valid = false;
+            return false;
+        }
     }
 };
 

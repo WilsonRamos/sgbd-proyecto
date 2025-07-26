@@ -3,19 +3,19 @@
 
 #include <vector>
 #include <memory>
+#include <unordered_map>
 #include <iostream>
+#include <sstream>
 #include <iomanip>
-#include <chrono>
-#include <thread>
-
-#include "PageDirectory.h"
-#include "PageTable.h"
-#include "LRUReplacer.h"
 #include "../DiskManagerExtended.h"
 #include "../Block.h"
+#include "PageTable.h"
+#include "LRUReplacer.h"
+// ✅ USAR PageLocation de PageDirectory.h - NO REDEFINIR
+#include "PageDirectory.h"
 
 /**
- * @brief Estados de operación en páginas
+ * @brief Operaciones posibles en páginas
  */
 enum class PageOperation {
     READ,
@@ -23,65 +23,62 @@ enum class PageOperation {
 };
 
 /**
- * @brief Información de una página en el buffer pool
+ * @brief Frame en el buffer pool
  */
 struct BufferPage {
-    int page_id;
     std::shared_ptr<Block> block;
+    int page_id;
     bool is_dirty;
-    std::chrono::steady_clock::time_point load_time;
+    bool is_pinned;
+    size_t access_count;
     
-    BufferPage() : page_id(-1), is_dirty(false) {
-        load_time = std::chrono::steady_clock::now();
-    }
-    
-    BufferPage(int pid, std::shared_ptr<Block> blk) 
-        : page_id(pid), block(blk), is_dirty(false) {
-        load_time = std::chrono::steady_clock::now();
+    BufferPage() : page_id(-1), is_dirty(false), is_pinned(false), access_count(0) {
+        // ✅ CREAR Block con dirección física dummy y tamaño por defecto
+        PhysicalAddress dummy_addr(0, 0, 0, 0);
+        block = std::make_shared<Block>(dummy_addr, 4096);
     }
 };
 
 /**
- * @brief Buffer Pool Manager - Componente principal del sistema de gestión de memoria
+ * @brief Buffer Pool Manager
  * 
- * Integra todos los componentes siguiendo la arquitectura de la conferencia CMU:
- * - Page Table (en memoria) para mapeo PageID → FrameID
- * - Page Directory consultado desde DiskManager (NO gestionado aquí)
- * - LRU Replacer para política de evicción
- * - Buffer Pool (array de frames en memoria)
- * - Integración con DiskManagerExtended
+ * Gestiona el buffer pool con políticas LRU/Clock
+ * Coordina entre memoria y disco
+ * Mantiene Page Table y estadísticas
  */
 class BufferPoolManager {
 private:
-    size_t pool_size;                                 // Tamaño del buffer pool
-    std::vector<BufferPage> buffer_pool;              // Array de frames (buffer pool)
-    std::vector<bool> free_frames;                    // Frames libres
+    std::vector<BufferPage> buffer_pool;            // Pool de frames
+    std::unique_ptr<PageTable> page_table;          // Page Table para mapeo
+    std::unique_ptr<LRUReplacer> lru_replacer;      // Algoritmo de reemplazo
     
-    std::unique_ptr<PageTable> page_table;            // Page Table (memoria)
-    std::unique_ptr<LRUReplacer> lru_replacer;       // Política LRU
-    
-    DiskManagerExtended* disk_manager;                // Referencia al disk manager extendido
+    // ✅ CORREGIR ORDEN DE INICIALIZACIÓN
+    DiskManagerExtended* disk_manager;              // Referencia al DiskManager
+    size_t pool_size;                               // Tamaño del pool
+    size_t next_free_frame;                         // Próximo frame libre
     
     // Estadísticas
-    size_t read_operations;
-    size_t write_operations;
-    size_t page_faults;                              // Páginas no encontradas en memoria
-    size_t evictions;                                // Páginas evictadas
+    mutable size_t read_operations;
+    mutable size_t write_operations;
+    mutable size_t page_faults;
+    mutable size_t evictions;
 
 public:
     /**
-     * @brief Constructor
+     * @brief Constructor - ✅ ORDEN CORREGIDO
      */
-    BufferPoolManager(size_t pool_size, DiskManagerExtended* dm)
-        : pool_size(pool_size)
-        , buffer_pool(pool_size)
-        , free_frames(pool_size, true)
-        , disk_manager(dm)
+    BufferPoolManager(size_t pool_size, DiskManagerExtended* disk_mgr)
+        : disk_manager(disk_mgr)                    // Primero
+        , pool_size(pool_size)                      // Segundo
+        , next_free_frame(0)
         , read_operations(0)
         , write_operations(0)
         , page_faults(0)
         , evictions(0)
     {
+        // Inicializar buffer pool
+        buffer_pool.resize(pool_size);
+        
         // Inicializar componentes
         page_table = std::make_unique<PageTable>();
         lru_replacer = std::make_unique<LRUReplacer>(pool_size);
@@ -98,10 +95,21 @@ public:
      */
     ~BufferPoolManager() {
         flushAllPages();
-        // Page Directory se guarda automáticamente por DiskManager
         std::cout << "💾 Buffer Pool Manager: Estado guardado" << std::endl;
     }
 
+    // ============================================================================
+    // OPERACIONES PRINCIPALES
+    // ============================================================================
+    
+    /**
+     * @brief ✅ FUNCIÓN AGREGADA - Verifica si una página está en el buffer
+     */
+    bool isPageInBuffer(int page_id) const {
+        PageTableEntry entry;
+        return page_table->findPage(page_id, entry);
+    }
+    
     /**
      * @brief Solicita una página para operación (READ/WRITE)
      */
@@ -113,7 +121,7 @@ public:
         // 1. Verificar si está en Page Table (memoria)
         PageTableEntry entry;
         if (page_table->findPage(page_id, entry)) {
-            std::cout << "Página " << page_id << " encontrada en memoria (Frame " 
+            std::cout << "✅ Página " << page_id << " encontrada en memoria (Frame " 
                       << entry.frame_id << ")" << std::endl;
             
             // Pin la página
@@ -151,361 +159,256 @@ public:
         std::cout << "📀 Página " << page_id << " encontrada en disco: " 
                   << location.file_id << std::endl;
         
-        // 4. Cargar página en buffer pool
-        return loadPageFromDisk(page_id, location, operation);
-    }
-
-    /**
-     * @brief Crea una nueva página
-     */
-    int createNewPage() {
-        // Buscar frame libre o evictar
-        int frame_id = findFreeFrame();
+        // 4. Obtener frame libre
+        int frame_id = getAvailableFrame();
         if (frame_id == -1) {
-            std::cout << "❌ No se pudo crear página: buffer pool lleno" << std::endl;
-            return -1;
+            std::cout << "❌ No hay frames disponibles" << std::endl;
+            return nullptr;
         }
         
-        // Obtener nuevo Page ID del DiskManager
-        int new_page_id = disk_manager->allocateNewPageId();
+        // 5. ✅ CREAR Block con dirección física apropiada
+        PhysicalAddress addr(0, 0, 0, page_id); // Simplificado para educación
+        Block loaded_block(addr, 4096);
         
-        // Crear nuevo bloque con dirección temporal
-        PhysicalAddress addr(0, 0, 0, new_page_id); // Dirección temporal
-        auto new_block = std::make_shared<Block>(addr, 4096);
+        // Simular lectura desde disco
+        if (!disk_manager->readBlock(addr, loaded_block)) {
+            std::cout << "❌ Error leyendo página desde disco" << std::endl;
+            return nullptr;
+        }
         
-        // Registrar en Page Directory (a través del DiskManager)
-        disk_manager->registerBlockAsPage(addr, 4096);
+        // 6. Actualizar buffer pool
+        buffer_pool[frame_id].block = std::make_shared<Block>(loaded_block);
+        buffer_pool[frame_id].page_id = page_id;
+        buffer_pool[frame_id].is_dirty = false;
+        buffer_pool[frame_id].is_pinned = true;
+        buffer_pool[frame_id].access_count++;
         
-        // Añadir a buffer pool
-        buffer_pool[frame_id] = BufferPage(new_page_id, new_block);
-        buffer_pool[frame_id].is_dirty = true;  // Nueva página siempre es dirty
-        free_frames[frame_id] = false;
+        // 7. Actualizar Page Table
+        page_table->insertPage(page_id, frame_id);
+        if (operation == PageOperation::WRITE) {
+            page_table->markDirty(page_id);
+            buffer_pool[frame_id].is_dirty = true;
+        }
         
-        // Actualizar Page Table
-        page_table->insertPage(new_page_id, frame_id);
-        page_table->pinPage(new_page_id);
-        page_table->markDirty(new_page_id);
-        
-        // Actualizar LRU
+        // 8. Actualizar LRU
         lru_replacer->recordAccess(frame_id);
         
-        std::cout << "✨ Nueva página " << new_page_id << " creada en Frame " 
-                  << frame_id << std::endl;
+        if (operation == PageOperation::READ) {
+            read_operations++;
+        } else {
+            write_operations++;
+        }
         
-        return new_page_id;
+        std::cout << "✅ Página " << page_id << " cargada en Frame " << frame_id << std::endl;
+        return buffer_pool[frame_id].block;
     }
-
+    
     /**
      * @brief Libera una página (unpin)
      */
-    bool unpinPage(int page_id, bool mark_dirty = false) {
+    bool releasePage(int page_id) {
         PageTableEntry entry;
         if (!page_table->findPage(page_id, entry)) {
             return false;
         }
         
-        bool success = page_table->unpinPage(page_id, mark_dirty);
-        if (success && mark_dirty) {
-            buffer_pool[entry.frame_id].is_dirty = true;
-        }
+        page_table->unpinPage(page_id);
+        buffer_pool[entry.frame_id].is_pinned = false;
         
-        // Si no está pinned, añadir al LRU replacer
-        if (success) {
-            PageTableEntry updated_entry;
-            page_table->findPage(page_id, updated_entry);
-            if (updated_entry.pin_count == 0) {
-                lru_replacer->unpin(entry.frame_id);
-            }
-        }
+        // Notificar al replacer que el frame está disponible
+        lru_replacer->unpin(entry.frame_id);
         
-        return success;
-    }
-
-    /**
-     * @brief Elimina una página del sistema
-     */
-    bool deletePage(int page_id) {
-        PageTableEntry entry;
-        if (page_table->findPage(page_id, entry)) {
-            if (entry.pin_count > 0) {
-                std::cout << "❌ No se puede eliminar página " << page_id 
-                          << ": está siendo usada" << std::endl;
-                return false;
-            }
-            
-            // Remover de estructuras
-            lru_replacer->remove(entry.frame_id);
-            page_table->removePage(page_id);
-            free_frames[entry.frame_id] = true;
-            buffer_pool[entry.frame_id] = BufferPage();
-        }
-        
-        // Note: Page Directory elimination is handled by DiskManager
-        
-        std::cout << "🗑️  Página " << page_id << " eliminada del buffer pool" << std::endl;
+        std::cout << "📌 Página " << page_id << " liberada (Frame " << entry.frame_id << ")" << std::endl;
         return true;
     }
-
+    
+    /**
+     * @brief Fuerza escritura de una página a disco
+     */
+    bool flushPage(int page_id) {
+        PageTableEntry entry;
+        if (!page_table->findPage(page_id, entry)) {
+            return false;
+        }
+        
+        if (buffer_pool[entry.frame_id].is_dirty) {
+            // Obtener ubicación física de la página
+            PageLocation location;
+            if (disk_manager->findPageLocation(page_id, location)) {
+                // Crear dirección física desde la ubicación
+                PhysicalAddress addr(0, 0, 0, page_id); // Simplificado
+                
+                // Escribir a disco
+                if (disk_manager->writeBlock(addr, *buffer_pool[entry.frame_id].block)) {
+                    buffer_pool[entry.frame_id].is_dirty = false;
+                    page_table->clearDirty(page_id);
+                    write_operations++;
+                    
+                    std::cout << "💾 Página " << page_id << " escrita a disco" << std::endl;
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
     /**
      * @brief Fuerza escritura de todas las páginas dirty
      */
     void flushAllPages() {
-        std::cout << "\n💾 Guardando todas las páginas dirty..." << std::endl;
+        std::cout << "💾 Escribiendo todas las páginas dirty a disco..." << std::endl;
         
         int flushed_count = 0;
-        for (size_t i = 0; i < buffer_pool.size(); ++i) {
-            if (!free_frames[i] && buffer_pool[i].is_dirty) {
-                flushPageToDisk(buffer_pool[i].page_id, i);
-                flushed_count++;
+        for (size_t i = 0; i < buffer_pool.size(); i++) {
+            if (buffer_pool[i].page_id != -1 && buffer_pool[i].is_dirty) {
+                if (flushPage(buffer_pool[i].page_id)) {
+                    flushed_count++;
+                }
             }
         }
         
-        std::cout << "💾 " << flushed_count << " páginas guardadas en disco" << std::endl;
+        std::cout << "✅ " << flushed_count << " páginas escritas a disco" << std::endl;
     }
-
-    /**
-     * @brief Muestra información completa del buffer pool
-     */
-    void displayBufferPoolInfo() {
-        std::cout << "\n═══════════════════════════════════════════════════════" << std::endl;
-        std::cout << "🏊 ESTADO COMPLETO DEL BUFFER POOL" << std::endl;
-        std::cout << "═══════════════════════════════════════════════════════" << std::endl;
-        
-        // Información general
-        auto stats = getStats();
-        std::cout << "📊 Estadísticas Generales:" << std::endl;
-        std::cout << "   - Frames totales: " << pool_size << std::endl;
-        std::cout << "   - Frames ocupados: " << stats.occupied_frames << std::endl;
-        std::cout << "   - Frames libres: " << stats.free_frames << std::endl;
-        std::cout << "   - Páginas dirty: " << stats.dirty_pages << std::endl;
-        std::cout << "   - Páginas pinned: " << stats.pinned_pages << std::endl;
-        std::cout << "   - Utilización: " << std::fixed << std::setprecision(1) 
-                  << stats.utilization << "%" << std::endl;
-        
-        // Buffer Pool detallado
-        std::cout << "\n🎯 Buffer Pool (Frames en Memoria):" << std::endl;
-        std::cout << std::setw(8) << "Frame" 
-                  << std::setw(8) << "PageID"
-                  << std::setw(8) << "Status"
-                  << std::setw(8) << "Dirty"
-                  << std::setw(8) << "Pin"
-                  << std::setw(15) << "LoadTime" << std::endl;
-        std::cout << std::string(55, '-') << std::endl;
-        
-        for (size_t i = 0; i < buffer_pool.size(); ++i) {
-            if (!free_frames[i]) {
-                PageTableEntry entry;
-                page_table->findPage(buffer_pool[i].page_id, entry);
-                
-                auto load_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - buffer_pool[i].load_time).count();
-                
-                std::cout << std::setw(8) << i
-                          << std::setw(8) << buffer_pool[i].page_id
-                          << std::setw(8) << "USED"
-                          << std::setw(8) << (buffer_pool[i].is_dirty ? "YES" : "NO")
-                          << std::setw(8) << entry.pin_count
-                          << std::setw(12) << load_time << "ms" << std::endl;
-            } else {
-                std::cout << std::setw(8) << i
-                          << std::setw(8) << "-"
-                          << std::setw(8) << "FREE"
-                          << std::setw(8) << "-"
-                          << std::setw(8) << "-"
-                          << std::setw(15) << "-" << std::endl;
-            }
-        }
-        
-        // Mostrar componentes
-        page_table->displayInfo();
-        disk_manager->displayPageDirectory();  // Page Directory desde DiskManager
-        lru_replacer->displayInfo();
-        
-        // Estadísticas de rendimiento
-        std::cout << "\n📈 Rendimiento:" << std::endl;
-        std::cout << "   - Operaciones de lectura: " << read_operations << std::endl;
-        std::cout << "   - Operaciones de escritura: " << write_operations << std::endl;
-        std::cout << "   - Page faults: " << page_faults << std::endl;
-        std::cout << "   - Eviciones: " << evictions << std::endl;
-        if (read_operations + write_operations > 0) {
-            double hit_rate = 1.0 - (static_cast<double>(page_faults) / 
-                                   (read_operations + write_operations));
-            std::cout << "   - Hit rate: " << std::fixed << std::setprecision(1) 
-                      << (hit_rate * 100.0) << "%" << std::endl;
-        }
-    }
-
-    /**
-     * @brief Resumen compacto para demos
-     */
-    void displayCompactStatus() {
-        std::cout << "\n📋 Buffer Pool Status: ";
-        int used_frames = 0;
-        for (size_t i = 0; i < buffer_pool.size(); ++i) {
-            if (!free_frames[i]) {
-                used_frames++;
-                std::cout << "[F" << i << ":P" << buffer_pool[i].page_id;
-                if (buffer_pool[i].is_dirty) std::cout << "D";
-                std::cout << "] ";
-            }
-        }
-        std::cout << " (" << used_frames << "/" << pool_size << " frames)" << std::endl;
-        
-        page_table->displayCompact();
-        lru_replacer->displayCompact();
-    }
-
-    // Getters para estadísticas
-    struct BufferStats {
-        size_t total_frames;
-        size_t occupied_frames;
-        size_t free_frames;
-        size_t dirty_pages;
-        size_t pinned_pages;
-        double utilization;
-        size_t total_operations;
-        size_t page_faults;
-        size_t evictions;
-    };
     
-    BufferStats getStats() const {
-        BufferStats stats = {};
-        stats.total_frames = pool_size;
-        
-        auto page_stats = page_table->getStats();
-        stats.occupied_frames = page_stats.total_pages;
-        stats.free_frames = pool_size - stats.occupied_frames;
-        stats.dirty_pages = page_stats.dirty_pages;
-        stats.pinned_pages = page_stats.pinned_pages;
-        stats.utilization = pool_size > 0 ? 
-            (static_cast<double>(stats.occupied_frames) / pool_size * 100.0) : 0.0;
-        stats.total_operations = read_operations + write_operations;
-        stats.page_faults = page_faults;
-        stats.evictions = evictions;
-        
-        return stats;
-    }
-
-private:
+    // ============================================================================
+    // GESTIÓN DE FRAMES
+    // ============================================================================
+    
     /**
-     * @brief Carga una página desde disco al buffer pool
+     * @brief Obtiene un frame disponible
      */
-    std::shared_ptr<Block> loadPageFromDisk(int page_id, const PageLocation& location, PageOperation operation) {
-        // Buscar frame libre o evictar
-        int frame_id = findFreeFrame();
-        if (frame_id == -1) {
-            std::cout << "❌ No se pudo cargar página: buffer pool lleno" << std::endl;
-            return nullptr;
-        }
-        
-        // Simular carga desde disco
-        std::cout << "📀 Cargando página " << page_id << " desde disco..." << std::endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(50)); // Simular latencia de disco
-        
-        // Obtener PhysicalAddress desde DiskManager
-        PhysicalAddress addr;
-        if (!disk_manager->getAddressForPageId(page_id, addr)) {
-            std::cout << "❌ Error obteniendo dirección física para página " << page_id << std::endl;
-            return nullptr;
-        }
-        
-        auto block = std::make_shared<Block>(addr, location.size);
-        if (disk_manager && disk_manager->readBlock(addr, *block)) {
-            // Añadir al buffer pool
-            buffer_pool[frame_id] = BufferPage(page_id, block);
-            free_frames[frame_id] = false;
-            
-            // Actualizar Page Table
-            page_table->insertPage(page_id, frame_id);
-            page_table->pinPage(page_id);
-            
-            if (operation == PageOperation::WRITE) {
-                page_table->markDirty(page_id);
-                buffer_pool[frame_id].is_dirty = true;
-            }
-            
-            // Actualizar LRU
-            lru_replacer->recordAccess(frame_id);
-            
-            std::cout << "✅ Página " << page_id << " cargada en Frame " << frame_id << std::endl;
-            
-            if (operation == PageOperation::READ) {
-                read_operations++;
-            } else {
-                write_operations++;
-            }
-            
-            return block;
-        }
-        
-        std::cout << "❌ Error cargando página " << page_id << " desde disco" << std::endl;
-        return nullptr;
-    }
-
-    /**
-     * @brief Encuentra un frame libre o evicta uno
-     */
-    int findFreeFrame() {
-        // Buscar frame libre
-        for (size_t i = 0; i < free_frames.size(); ++i) {
-            if (free_frames[i]) {
+    int getAvailableFrame() {
+        // 1. Buscar frame libre
+        for (size_t i = 0; i < buffer_pool.size(); i++) {
+            if (buffer_pool[i].page_id == -1) {
                 return static_cast<int>(i);
             }
         }
         
-        // No hay frames libres, aplicar política LRU
-        int victim_frame;
-        if (lru_replacer->victim(victim_frame)) {
-            return evictPage(victim_frame);
+        // 2. No hay frames libres - usar LRU para encontrar víctima
+        int victim_frame = lru_replacer->evict();
+        if (victim_frame == -1) {
+            return -1; // Todos los frames están pinned
         }
         
-        return -1;
-    }
-
-    /**
-     * @brief Evicta una página de un frame específico
-     */
-    int evictPage(int frame_id) {
-        if (frame_id < 0 || frame_id >= static_cast<int>(buffer_pool.size()) || 
-            free_frames[frame_id]) {
-            return -1;
+        // 3. Si la víctima está dirty, escribirla a disco
+        if (buffer_pool[victim_frame].is_dirty) {
+            flushPage(buffer_pool[victim_frame].page_id);
         }
         
-        int page_id = buffer_pool[frame_id].page_id;
-        std::cout << "🎯 Evictando página " << page_id << " del Frame " << frame_id << std::endl;
+        // 4. Remover de Page Table
+        page_table->removePage(buffer_pool[victim_frame].page_id);
         
-        // Si está dirty, escribir a disco
-        if (buffer_pool[frame_id].is_dirty) {
-            flushPageToDisk(page_id, frame_id);
-        }
-        
-        // Remover de Page Table y LRU
-        page_table->removePage(page_id);
-        lru_replacer->remove(frame_id);
-        
-        // Liberar frame
-        buffer_pool[frame_id] = BufferPage();
-        free_frames[frame_id] = true;
+        // 5. Limpiar frame
+        buffer_pool[victim_frame].page_id = -1;
+        buffer_pool[victim_frame].is_dirty = false;
+        buffer_pool[victim_frame].is_pinned = false;
         
         evictions++;
-        std::cout << "✅ Frame " << frame_id << " liberado por evicción" << std::endl;
+        std::cout << "🔄 Frame " << victim_frame << " liberado (eviction)" << std::endl;
         
-        return frame_id;
+        return victim_frame;
+    }
+    
+    // ============================================================================
+    // ESTADÍSTICAS Y INFORMACIÓN
+    // ============================================================================
+    
+    /**
+     * @brief Obtiene estadísticas del buffer pool
+     */
+    std::string getStatistics() const {
+        std::ostringstream ss;
+        
+        int used_frames = 0;
+        int dirty_frames = 0;
+        int pinned_frames = 0;
+        
+        for (const auto& frame : buffer_pool) {
+            if (frame.page_id != -1) {
+                used_frames++;
+                if (frame.is_dirty) dirty_frames++;
+                if (frame.is_pinned) pinned_frames++;
+            }
+        }
+        
+        ss << "=== ESTADÍSTICAS BUFFER POOL ===\n";
+        ss << "Pool Size: " << pool_size << " frames\n";
+        ss << "Frames Usados: " << used_frames << "/" << pool_size << "\n";
+        ss << "Frames Dirty: " << dirty_frames << "\n";
+        ss << "Frames Pinned: " << pinned_frames << "\n";
+        ss << "\n--- Operaciones ---\n";
+        ss << "Lecturas: " << read_operations << "\n";
+        ss << "Escrituras: " << write_operations << "\n";
+        ss << "Page Faults: " << page_faults << "\n";
+        ss << "Evictions: " << evictions << "\n";
+        
+        if (read_operations + write_operations > 0) {
+            double hit_rate = 1.0 - (double)page_faults / (read_operations + write_operations);
+            ss << "Hit Rate: " << std::fixed << std::setprecision(2) << (hit_rate * 100) << "%\n";
+        }
+        
+        return ss.str();
+    }
+    
+    /**
+     * @brief Muestra estado actual del buffer pool
+     */
+    void display() const {
+        std::cout << "\n🗂️ ESTADO DEL BUFFER POOL" << std::endl;
+        std::cout << "==========================" << std::endl;
+        
+        for (size_t i = 0; i < buffer_pool.size(); i++) {
+            const auto& frame = buffer_pool[i];
+            std::cout << "Frame[" << i << "]: ";
+            
+            if (frame.page_id == -1) {
+                std::cout << "LIBRE" << std::endl;
+            } else {
+                std::cout << "PageID=" << frame.page_id 
+                         << " | Dirty=" << (frame.is_dirty ? "✓" : "✗")
+                         << " | Pinned=" << (frame.is_pinned ? "✓" : "✗")
+                         << " | Access=" << frame.access_count << std::endl;
+            }
+        }
+        
+        std::cout << "\n" << getStatistics() << std::endl;
     }
 
+    // ============================================================================
+    // GETTERS
+    // ============================================================================
+    
+    size_t getPoolSize() const { return pool_size; }
+    size_t getPageFaults() const { return page_faults; }
+    size_t getReadOperations() const { return read_operations; }
+    size_t getWriteOperations() const { return write_operations; }
+    size_t getEvictions() const { return evictions; }
+    
     /**
-     * @brief Escribe una página a disco
+     * @brief ✅ FUNCIÓN AGREGADA - Obtiene información de uso del buffer
      */
-    void flushPageToDisk(int page_id, int frame_id) {
-        if (disk_manager && buffer_pool[frame_id].block) {
-            PhysicalAddress addr = buffer_pool[frame_id].block->getAddress();
-            disk_manager->writeBlock(addr, *buffer_pool[frame_id].block);
-            
-            buffer_pool[frame_id].is_dirty = false;
-            page_table->clearDirty(page_id);
-            
-            std::cout << "💾 Página " << page_id << " escrita a disco" << std::endl;
+    double getUtilization() const {
+        int used_frames = 0;
+        for (const auto& frame : buffer_pool) {
+            if (frame.page_id != -1) {
+                used_frames++;
+            }
         }
+        return (double)used_frames / pool_size;
+    }
+    
+    /**
+     * @brief ✅ FUNCIÓN AGREGADA - Verifica si el buffer pool está lleno
+     */
+    bool isFull() const {
+        for (const auto& frame : buffer_pool) {
+            if (frame.page_id == -1) {
+                return false;
+            }
+        }
+        return true;
     }
 };
 
