@@ -1,13 +1,10 @@
+
 g++ -std=c++17 -lstdc++fs testRegistrosFixed2.cpp -o fixed
-    g++ -std=c++17 main_ejemplo_integracion.cpp -o demo -Iinclude -Iinclude/buffer -finput-charset=UTF-8
-# Opción 1: Con C++17 y filesystem
-g++ -std=c++17 -Iinclude -Iinclude/buffer \
-    main_simple.cpp -lstdc++fs -o demo_simple
+g++ -std=c++17 main_ejemplo_integracion.cpp -o demo -Iinclude -Iinclude/buffer -finput-charset=UTF-8
 
-# Opción 2: Si la anterior falla
-g++ -std=c++17 -Iinclude -Iinclude/buffer \
-    main_simple.cpp -o demo_simple
-
+    
+Comliacion Integrado : 
+g++ -std=c++17 -Wall -Wextra -g -Wno-sign-compare -Wno-unused-variable -I./include -I./include/buffer -I./include/HashExtendible -I./include/BPlusTree -o ./bin/sgbd_extended src/main.cpp
 
 
     https://claude.ai/chat/093a1aea-29cd-4ab0-b268-e7fd2e416c22

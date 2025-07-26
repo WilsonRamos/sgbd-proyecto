@@ -1,35 +1,30 @@
-# Makefile para SGBD Completo con Sistema Distribuido Modularizado
+# Makefile para SGBD Completo con Índices Especializados Integrados
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -g -Wno-sign-compare -Wno-unused-variable
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -g -Wno-sign-compare -Wno-unused-variable -Wno-unused-parameter
 INCLUDES = -I./include
 SRCDIR = src
 OBJDIR = obj
 BINDIR = bin
 
-# Targets principales
-TARGET_MAIN = sgbd_main
-TARGET_DISTRIBUTED = sgbd_distributed
-TARGET_INTERACTIVE = sgbd_interactive
+# Target principal
+TARGET_MAIN = sgbd_indices_completo
 
 # Archivos fuente
-MAIN_SRC = $(SRCDIR)/main_extended.cpp
-DISTRIBUTED_MAIN_SRC = $(SRCDIR)/main_distributed.cpp
-DISTRIBUTED_SRC = $(SRCDIR)/SGBDDistributed.cpp $(SRCDIR)/SGBDDistributed_Interface.cpp
-INTERACTIVE_SRC = sgbd_distribuido_gps.cpp
+MAIN_SRC = $(SRCDIR)/main.cpp
 
-# Headers requeridos - ESTRUCTURA COMPLETA
+# Headers requeridos - ESTRUCTURA COMPLETA CON ÍNDICES
 CORE_HEADERS = include/Record.h \
                include/PhysicalAddress.h \
                include/Block.h \
                include/DiskManager.h \
                include/DiskManagerExtended.h \
-               include/RecordReference.h
+               include/RecordReference.h \
+               include/IndexManager.h
 
 HASH_HEADERS = include/HashExtendible/ExtensibleHash.h \
                include/HashExtendible/Directory.h \
                include/HashExtendible/Bucket.h \
-               include/HashExtendible/HashFunction.h \
-               include/HashExtendible/HashEntry.h
+               include/HashExtendible/HashFunction.h
 
 BTREE_HEADERS = include/BPlusTree/BPlusTree.h \
                 include/BPlusTree/BPlusNode.h \
@@ -44,21 +39,16 @@ BUFFER_HEADERS = include/buffer/BufferManagerClock.h \
                  include/buffer/LRUReplacer.h \
                  include/buffer/PageDirectory.h
 
-DISTRIBUTED_HEADERS = include/SGBDDistributed.h
-
-ALL_HEADERS = $(CORE_HEADERS) $(HASH_HEADERS) $(BTREE_HEADERS) $(BUFFER_HEADERS) $(DISTRIBUTED_HEADERS)
-
-# Objetos compilados
-DISTRIBUTED_OBJS = $(OBJDIR)/SGBDDistributed.o $(OBJDIR)/SGBDDistributed_Interface.o
+ALL_HEADERS = $(CORE_HEADERS) $(HASH_HEADERS) $(BTREE_HEADERS) $(BUFFER_HEADERS)
 
 # Crear directorios si no existen
 $(shell mkdir -p $(OBJDIR) $(BINDIR) data)
 
-.PHONY: all clean run demo test help check-headers check-data distributed main interactive
+.PHONY: all clean run demo test help check-headers check-data info
 
 # Verificar headers antes de compilar
 check-headers:
-	@echo "🔍 Verificando headers requeridos..."
+	@echo "🔍 Verificando headers requeridos para sistema integrado..."
 	@missing_headers=""; \
 	for header in $(ALL_HEADERS); do \
 		if [ ! -f "$$header" ]; then \
@@ -72,13 +62,15 @@ check-headers:
 		echo "$$missing_headers"; \
 		echo ""; \
 		echo "📋 SOLUCIÓN:"; \
-		echo "   1. Crear include/RecordReference.h (código proporcionado)"; \
-		echo "   2. Crear include/SGBDDistributed.h (código proporcionado)"; \
-		echo "   3. Verificar estructura completa de headers"; \
+		echo "   1. Crear include/RecordReference.h"; \
+		echo "   2. Crear include/IndexManager.h"; \
+		echo "   3. Crear todos los headers de HashExtendible/"; \
+		echo "   4. Crear todos los headers de BPlusTree/"; \
+		echo "   5. Verificar estructura completa de headers"; \
 		echo ""; \
 		exit 1; \
 	else \
-		echo "✅ Todos los headers encontrados"; \
+		echo "✅ Todos los headers encontrados ($(words $(ALL_HEADERS)) archivos)"; \
 	fi
 
 # Verificar datos
@@ -90,227 +82,237 @@ check-data:
 		mkdir -p data; \
 		echo '"id","imei","commandId","timestamp","latitude","longitude","recordIndex","timestampExtension","recordExtension","priority","altitude","angle","satellites","speed","hdop","eventId","punto","ioElements","processedAt","createdAt","updatedAt"' > data/data-GPS.csv; \
 		echo '"1","868018070237402","68","2025-06-25 00:47:02+00","-16.4103100","-71.5309216","0","0","0","0","2345.8","55.4","5","0","2.0","7","POINT","{}","2025-06-25 00:47:48+00","2025-06-25 00:47:48+00","2025-06-25 00:47:48+00"' >> data/data-GPS.csv; \
-		echo "✅ Archivo de muestra creado"; \
+		for i in $$(seq 2 100); do \
+			imei_suffix=$$(printf "%02d" $$((i % 100))); \
+			timestamp="2025-06-25 0$$(printf "%01d" $$((i % 24))):$$(printf "%02d" $$((i % 60))):$$(printf "%02d" $$((i % 60)))+00"; \
+			lat="-16.41$$(printf "%02d" $$((i % 100)))"; \
+			lon="-71.53$$(printf "%02d" $$((i % 100)))"; \
+			echo "\"$$i\",\"8680180702374$$imei_suffix\",\"68\",\"$$timestamp\",\"$$lat\",\"$$lon\",\"0\",\"0\",\"0\",\"0\",\"234$$i\",\"$$((i*10))\",\"$$((5 + i % 10))\",\"0\",\"$$((i % 5))\",\"7\",\"POINT\",\"{}\",\"$$timestamp\",\"$$timestamp\",\"$$timestamp\"" >> data/data-GPS.csv; \
+		done; \
+		echo "✅ Archivo de muestra creado con 100 registros GPS"; \
 	else \
-		echo "✅ data/data-GPS.csv encontrado"; \
+		record_count=$$(wc -l < data/data-GPS.csv); \
+		echo "✅ data/data-GPS.csv encontrado ($$record_count líneas)"; \
 	fi
 
-# Objetivo principal - compilar todo
-all: check-headers check-data $(BINDIR)/$(TARGET_MAIN) $(BINDIR)/$(TARGET_DISTRIBUTED) $(BINDIR)/$(TARGET_INTERACTIVE)
+# Crear estructura de directorios necesaria
+setup-dirs:
+	@echo "📁 Creando estructura de directorios..."
+	@mkdir -p $(OBJDIR) $(BINDIR) data
+	@mkdir -p bin/mi_disco_sgbde/metadata
+	@mkdir -p bin/mi_disco_sgbde/platter_0/surface_0/track_0
+	@mkdir -p bin/mi_disco_sgbde/platter_0/surface_1/track_0
+	@echo "✅ Estructura de directorios creada"
 
-# Compilar sistema principal integrado
-main: check-headers $(BINDIR)/$(TARGET_MAIN)
+# Objetivo principal - compilar sistema integrado
+all: check-headers check-data setup-dirs $(BINDIR)/$(TARGET_MAIN)
 
 $(BINDIR)/$(TARGET_MAIN): $(MAIN_SRC) $(ALL_HEADERS)
-	@echo "🔧 Compilando sistema principal integrado..."
+	@echo "🔧 Compilando sistema SGBD integrado con índices..."
+	@echo "   Source: $(MAIN_SRC)"
+	@echo "   Headers: $(words $(ALL_HEADERS)) archivos"
+	@echo "   Flags: $(CXXFLAGS)"
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $(MAIN_SRC)
-	@echo "✅ Sistema principal compilado: $@"
+	@echo "✅ Sistema compilado exitosamente: $@"
+	@echo ""
+	@echo "🎯 PARA EJECUTAR:"
+	@echo "   make run    - Ejecutar sistema interactivo"
+	@echo "   make demo   - Ejecutar demo educativo"
 
-# Compilar sistema distribuido modular
-distributed: check-headers check-data $(BINDIR)/$(TARGET_DISTRIBUTED)
-
-$(OBJDIR)/SGBDDistributed.o: $(SRCDIR)/SGBDDistributed.cpp $(ALL_HEADERS)
-	@echo "🔧 Compilando SGBDDistributed.cpp..."
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
-
-$(OBJDIR)/SGBDDistributed_Interface.o: $(SRCDIR)/SGBDDistributed_Interface.cpp $(ALL_HEADERS)
-	@echo "🔧 Compilando SGBDDistributed_Interface.cpp..."
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
-
-$(OBJDIR)/main_distributed.o: $(DISTRIBUTED_MAIN_SRC) $(ALL_HEADERS)
-	@echo "🔧 Compilando main_distributed.cpp..."
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
-
-$(BINDIR)/$(TARGET_DISTRIBUTED): $(DISTRIBUTED_OBJS) $(OBJDIR)/main_distributed.o
-	@echo "🔧 Enlazando sistema distribuido modular..."
-	$(CXX) $(CXXFLAGS) -o $@ $(DISTRIBUTED_OBJS) $(OBJDIR)/main_distributed.o
-	@echo "✅ Sistema distribuido modular compilado: $@"
-
-# Compilar sistema interactivo monolítico (compatibilidad)
-interactive: check-headers check-data $(BINDIR)/$(TARGET_INTERACTIVE)
-
-$(BINDIR)/$(TARGET_INTERACTIVE): $(INTERACTIVE_SRC) $(ALL_HEADERS)
-	@echo "🔧 Compilando sistema interactivo..."
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $(INTERACTIVE_SRC)
-	@echo "✅ Sistema interactivo compilado: $@"
-
-# Ejecutar sistema principal
-run-main: $(BINDIR)/$(TARGET_MAIN)
-	@echo "🚀 Ejecutando sistema principal integrado..."
-	@echo "=================================================="
+# Ejecutar el sistema
+run: $(BINDIR)/$(TARGET_MAIN)
+	@echo "🚀 INICIANDO SGBD CON ÍNDICES ESPECIALIZADOS"
+	@echo "=============================================="
+	@echo ""
+	@echo "📋 Sistema disponible:"
+	@echo "   • Hash Extensible para IMEI (Server A)"
+	@echo "   • B+ Tree para Timestamp (Server B)"
+	@echo "   • Persistencia de índices"
+	@echo "   • Buffer Pool Manager (LRU/Clock)"
+	@echo "   • Consultas SQL educativas"
+	@echo ""
+	@echo "▶️  Iniciando interfaz interactiva..."
+	@echo "=============================================="
 	./$(BINDIR)/$(TARGET_MAIN)
 
-# Ejecutar sistema distribuido
-run-distributed: $(BINDIR)/$(TARGET_DISTRIBUTED)
-	@echo "🚀 Ejecutando sistema distribuido modular..."
-	@echo "=================================================="
-	./$(BINDIR)/$(TARGET_DISTRIBUTED)
-
-# Ejecutar sistema interactivo
-run-interactive: $(BINDIR)/$(TARGET_INTERACTIVE)
-	@echo "🚀 Ejecutando sistema interactivo..."
-	@echo "=================================================="
-	./$(BINDIR)/$(TARGET_INTERACTIVE)
-
-# Demo completo - ejecutar el sistema principal
-demo: main
-	@echo "🎯 DEMOSTRACIÓN COMPLETA DEL SGBD INTEGRADO"
-	@echo "============================================"
+# Demo educativo
+demo: $(BINDIR)/$(TARGET_MAIN)
+	@echo "🎓 DEMO EDUCATIVO DEL SGBD CON ÍNDICES"
+	@echo "======================================"
 	@echo ""
-	@echo "📋 Sistema incluye:"
-	@echo "   • SGBD tradicional con Buffer Pool"
-	@echo "   • Sistema distribuido (Hash + B+ Tree)"
-	@echo "   • Carga de datasets (Housing, GPS)"
-	@echo "   • Comparación de algoritmos LRU vs Clock"
+	@echo "Este demo muestra:"
+	@echo "1. Carga de datos GPS"
+	@echo "2. Construcción de índices"
+	@echo "3. Consultas con Hash Extensible"
+	@echo "4. Consultas con B+ Tree"
+	@echo "5. Persistencia de índices"
 	@echo ""
-	@echo "🎯 Opciones disponibles:"
-	@echo "   1-30: Sistema SGBD tradicional"
-	@echo "   31-34: Sistema distribuido interactivo"
-	@echo ""
-	@echo "▶️  Iniciando sistema principal..."
-	@echo "=================================================="
+	@echo "▶️  Iniciando demo..."
+	@echo "======================================"
 	./$(BINDIR)/$(TARGET_MAIN)
 
-# Demo específico del sistema distribuido
-demo-distributed: distributed
-	@echo "🎯 DEMO DEL SISTEMA DISTRIBUIDO"
-	@echo "================================"
-	@echo ""
-	@echo "📋 Características:"
-	@echo "   • Hash Extensible para IMEI (S1)"
-	@echo "   • B+ Tree para Timestamp (S2)"
-	@echo "   • Routing automático vs manual"
-	@echo "   • Consultas SQL interactivas"
-	@echo "   • Dataset GPS completo"
-	@echo ""
-	@echo "▶️  Iniciando sistema distribuido..."
-	@echo "=================================="
-	./$(BINDIR)/$(TARGET_DISTRIBUTED)
-
-# Verificar sintaxis
-test: $(MAIN_SRC) $(DISTRIBUTED_SRC) $(INTERACTIVE_SRC) $(ALL_HEADERS)
-	@echo "🧪 Verificando sintaxis de todos los archivos..."
+# Verificar sintaxis de todos los archivos
+test: $(MAIN_SRC) $(ALL_HEADERS)
+	@echo "🧪 Verificando sintaxis del sistema completo..."
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -fsyntax-only $(MAIN_SRC)
-	@echo "✅ main_extended.cpp - OK"
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -fsyntax-only $(SRCDIR)/SGBDDistributed.cpp
-	@echo "✅ SGBDDistributed.cpp - OK"
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -fsyntax-only $(SRCDIR)/SGBDDistributed_Interface.cpp
-	@echo "✅ SGBDDistributed_Interface.cpp - OK"
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -fsyntax-only $(INTERACTIVE_SRC)
-	@echo "✅ sgbd_distribuido_gps.cpp - OK"
-	@echo "✅ Sintaxis correcta en todos los archivos"
+	@echo "✅ main.cpp - Sintaxis correcta"
+	@echo "✅ Verificación completa - Sin errores de sintaxis"
 
-# Compilar versión debug
-debug: CXXFLAGS += -DDEBUG -g3 -fsanitize=address
+# Compilar versión debug con información adicional
+debug: CXXFLAGS += -DDEBUG -g3 -fsanitize=address -fsanitize=undefined
 debug: all
-	@echo "🐛 Versión debug compilada con AddressSanitizer"
+	@echo "🐛 Versión debug compilada con sanitizers"
+	@echo "   AddressSanitizer: Detecta leaks de memoria"
+	@echo "   UBSanitizer: Detecta comportamiento indefinido"
 
 # Compilar versión release optimizada
-release: CXXFLAGS = -std=c++17 -O3 -DNDEBUG -march=native -Wno-sign-compare
+release: CXXFLAGS = -std=c++17 -O3 -DNDEBUG -march=native -Wno-sign-compare -DRELEASE
 release: all
 	@echo "🚀 Versión release optimizada compilada"
+	@echo "   Optimizaciones: -O3 -march=native"
+	@echo "   Definiciones: -DNDEBUG -DRELEASE"
 
 # Benchmark del sistema
 benchmark: release
-	@echo "⏱️  Ejecutando benchmark del sistema..."
-	@echo "Midiendo tiempos de respuesta para diferentes operaciones..."
-	time ./$(BINDIR)/$(TARGET_DISTRIBUTED)
+	@echo "⏱️  Ejecutando benchmark del sistema de índices..."
+	@echo "Midiendo tiempos de respuesta para:"
+	@echo "  • Construcción de índices"
+	@echo "  • Búsquedas Hash Extensible"
+	@echo "  • Búsquedas B+ Tree"
+	@echo "  • Operaciones de persistencia"
+	time ./$(BINDIR)/$(TARGET_MAIN)
 
-# Limpiar archivos compilados
+# Análisis de memoria
+memory-check: debug
+	@echo "🔍 Ejecutando análisis de memoria..."
+	@echo "Verificando leaks y uso de memoria..."
+	valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all \
+		--track-origins=yes --verbose ./$(BINDIR)/$(TARGET_MAIN)
+
+# Limpiar archivos compilados y temporales
 clean:
 	@echo "🧹 Limpiando archivos compilados..."
-	rm -rf $(OBJDIR)/* $(BINDIR)/*
-	@echo "✅ Limpieza completada"
+	rm -rf $(OBJDIR)/*
+	rm -rf $(BINDIR)/*
+	@echo "✅ Archivos compilados eliminados"
 
-# Limpiar todo incluyendo datos
+# Limpiar todo incluyendo datos simulados
 clean-all: clean
-	@echo "🧹 Limpiando datos generados..."
-	rm -rf data/
-	@echo "✅ Limpieza completa"
+	@echo "🧹 Limpiando datos de simulación..."
+	rm -rf bin/mi_disco_sgbde/
+	rm -f data/data-GPS.csv
+	@echo "✅ Limpieza completa realizada"
 
-# Información de ayuda
-help:
-	@echo "🛠️  MAKEFILE SGBD COMPLETO MODULARIZADO"
-	@echo "======================================="
-	@echo ""
-	@echo "Objetivos principales:"
-	@echo "  make all               - Compilar todo el sistema"
-	@echo "  make main              - Compilar sistema principal"
-	@echo "  make distributed       - Compilar sistema distribuido"
-	@echo "  make interactive       - Compilar sistema interactivo"
-	@echo ""
-	@echo "Ejecución:"
-	@echo "  make run-main          - Ejecutar sistema principal"
-	@echo "  make run-distributed   - Ejecutar sistema distribuido"
-	@echo "  make run-interactive   - Ejecutar sistema interactivo"
-	@echo "  make demo              - Demo completo del sistema principal"
-	@echo "  make demo-distributed  - Demo específico del sistema distribuido"
-	@echo ""
-	@echo "Desarrollo:"
-	@echo "  make test              - Verificar sintaxis"
-	@echo "  make debug             - Compilar versión debug"
-	@echo "  make release           - Compilar versión optimizada"
-	@echo "  make benchmark         - Benchmark de rendimiento"
-	@echo ""
-	@echo "Utilidades:"
-	@echo "  make check-headers     - Verificar headers requeridos"
-	@echo "  make check-data        - Verificar archivos de datos"
-	@echo "  make clean             - Limpiar compilados"
-	@echo "  make clean-all         - Limpiar todo + datos"
-	@echo "  make help              - Mostrar esta ayuda"
-	@echo ""
-	@echo "Estructura del proyecto:"
-	@echo "  📁 src/               - Código fuente modular"
-	@echo "  📁 include/           - Headers (.h)"
-	@echo "  📁 bin/               - Ejecutables"
-	@echo "  📁 obj/               - Objetos compilados"
-	@echo "  📁 data/              - Datasets (GPS, Housing)"
-	@echo ""
-	@echo "Componentes integrados:"
-	@echo "  🏢 SGBD Principal     - Sistema tradicional completo"
-	@echo "  🌐 Sistema Distribuido - Hash + B+ Tree especializado"
-	@echo "  💾 Buffer Management  - LRU + Clock algorithms"
-	@echo "  📊 Datasets          - Housing, GPS, Titanic"
-	@echo ""
-	@echo "Flujo recomendado:"
-	@echo "  1. make check-headers  (verificar dependencias)"
-	@echo "  2. make all           (compilar todo)"
-	@echo "  3. make demo          (ejecutar demo principal)"
-	@echo "  4. make demo-distributed (ejecutar demo distribuido)"
-
-# Información del proyecto
+# Información detallada del proyecto
 info:
-	@echo "📋 INFORMACIÓN DEL PROYECTO SGBD COMPLETO"
-	@echo "=========================================="
-	@echo "Proyecto: SGBD Físico + Sistema Distribuido Modularizado"
+	@echo "📋 INFORMACIÓN DEL PROYECTO SGBD CON ÍNDICES ESPECIALIZADOS"
+	@echo "============================================================="
+	@echo "Proyecto: SGBD Físico Educativo con Hash Extensible y B+ Tree"
 	@echo "Lenguaje: C++17"
 	@echo "Compilador: $(CXX)"
 	@echo "Flags: $(CXXFLAGS)"
 	@echo ""
-	@echo "Arquitectura del sistema:"
-	@echo "  🏢 Sistema Principal:"
-	@echo "     ├─ DiskManager + Buffer Pool"
-	@echo "     ├─ Tablas tradicionales"
-	@echo "     ├─ Datasets predefinidos"
-	@echo "     └─ Algoritmos LRU vs Clock"
+	@echo "🏗️ Arquitectura del sistema:"
+	@echo "  📦 Núcleo SGBD:"
+	@echo "     ├─ DiskManager + FileSystemSimulator"
+	@echo "     ├─ Buffer Pool Manager (LRU/Clock)"
+	@echo "     ├─ Page Directory persistente"
+	@echo "     └─ Record Management (Fixed/Variable)"
 	@echo ""
-	@echo "  🌐 Sistema Distribuido:"
-	@echo "     ├─ Servidor S1 (Hash Extensible - IMEI)"
-	@echo "     ├─ Servidor S2 (B+ Tree - Timestamp)"
-	@echo "     ├─ Query Router inteligente"
-	@echo "     └─ Interfaz SQL interactiva"
+	@echo "  🔍 Sistema de Índices:"
+	@echo "     ├─ Hash Extensible (IMEI)"
+	@echo "     │  ├─ Directory dinámico"
+	@echo "     │  ├─ Buckets con capacidad configurable"
+	@echo "     │  └─ Splits automáticos"
+	@echo "     └─ B+ Tree (Timestamp)"
+	@echo "        ├─ Nodos internos y hojas"
+	@echo "        ├─ Enlaces horizontales"
+	@echo "        └─ Búsquedas por rango"
 	@echo ""
-	@echo "Datasets soportados:"
-	@echo "  📊 Housing (545 registros) - Sistema principal"
-	@echo "  📍 GPS (variable) - Sistema distribuido"
-	@echo "  🚢 Titanic (891 registros) - Sistema principal"
+	@echo "  💾 Persistencia:"
+	@echo "     ├─ IndexManager para save/load"
+	@echo "     ├─ Metadatos de índices"
+	@echo "     └─ Reconstrucción automática"
 	@echo ""
-	@echo "Características técnicas:"
-	@echo "  ✅ Modularización completa"
-	@echo "  ✅ Headers bien organizados"
-	@echo "  ✅ Compilación separada"
-	@echo "  ✅ Múltiples puntos de entrada"
-	@echo "  ✅ Sistema de build robusto"
+	@echo "📊 Componentes principales:"
+	@echo "  Core Headers: $(words $(CORE_HEADERS))"
+	@echo "  Hash Headers: $(words $(HASH_HEADERS))"
+	@echo "  B+Tree Headers: $(words $(BTREE_HEADERS))"
+	@echo "  Buffer Headers: $(words $(BUFFER_HEADERS))"
+	@echo "  Total Headers: $(words $(ALL_HEADERS))"
+	@echo ""
+	@echo "🎯 Funcionalidades:"
+	@echo "  ✅ Servidor A: Hash Extensible (Transaccional)"
+	@echo "  ✅ Servidor B: B+ Tree (Analítico)"
+	@echo "  ✅ Consultas SQL educativas"
+	@echo "  ✅ Visualización de estructuras"
+	@echo "  ✅ Persistencia automática"
+	@echo "  ✅ Flujo educativo completo"
+	@echo ""
+	@echo "📁 Datasets soportados:"
+	@echo "  📍 GPS (2025-GPS.csv) - Sistema especializado"
+	@echo "     • IMEI → Hash Extensible O(1)"
+	@echo "     • Timestamp → B+ Tree O(log n)"
+	@echo "     • 21 campos por registro"
+	@echo "     • Soporte para 5000+ registros"
+
+# Mostrar ayuda
+help:
+	@echo "📚 AYUDA DEL MAKEFILE - SGBD CON ÍNDICES"
+	@echo "========================================"
+	@echo ""
+	@echo "🎯 Objetivos principales:"
+	@echo "  make all          - Compilar sistema completo"
+	@echo "  make run          - Ejecutar sistema interactivo"
+	@echo "  make demo         - Ejecutar demo educativo"
+	@echo ""
+	@echo "🔧 Compilación:"
+	@echo "  make debug        - Compilar con debug + sanitizers"
+	@echo "  make release      - Compilar optimizado para producción"
+	@echo "  make test         - Verificar sintaxis únicamente"
+	@echo ""
+	@echo "🧪 Testing y análisis:"
+	@echo "  make benchmark    - Benchmark de rendimiento"
+	@echo "  make memory-check - Análisis de memoria con Valgrind"
+	@echo ""
+	@echo "🧹 Limpieza:"
+	@echo "  make clean        - Limpiar archivos compilados"
+	@echo "  make clean-all    - Limpieza completa (incluye datos)"
+	@echo ""
+	@echo "ℹ️  Información:"
+	@echo "  make info         - Información detallada del proyecto"
+	@echo "  make check-headers - Verificar headers requeridos"
+	@echo "  make check-data   - Verificar archivos de datos"
+	@echo ""
+	@echo "📋 Estructura de archivos requerida:"
+	@echo "  src/main.cpp                     - Programa principal"
+	@echo "  include/IndexManager.h          - Gestor de persistencia"
+	@echo "  include/HashExtendible/*.h       - Hash Extensible"
+	@echo "  include/BPlusTree/*.h            - B+ Tree"
+	@echo "  include/buffer/*.h               - Buffer Management"
+	@echo "  data/data-GPS.csv               - Dataset GPS"
+	@echo ""
+	@echo "🚀 Para empezar:"
+	@echo "  1. make check-headers"
+	@echo "  2. make all"
+	@echo "  3. make run"
 
 # Objetivo por defecto
-.DEFAULT_GOAL := helps
+.DEFAULT_GOAL := help
+
+# Información de compilación en tiempo real
+$(BINDIR)/$(TARGET_MAIN): 
+	@echo "🔨 INICIANDO COMPILACIÓN..."
+	@echo "   📁 Directorio fuente: $(SRCDIR)"
+	@echo "   📁 Directorio destino: $(BINDIR)"
+	@echo "   🔧 Compilador: $(CXX)"
+	@echo "   ⚙️  Flags: $(CXXFLAGS)"
+	@echo "   📚 Headers incluidos: $(words $(ALL_HEADERS))"
+	@echo ""
+	@echo "🏗️ Compilando..."
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $(MAIN_SRC)
+	@echo ""
+	@echo "✅ COMPILACIÓN EXITOSA!"
+	@echo "   📦 Ejecutable: $@"
+	@echo "   📊 Tamaño: $$(du -h $@ | cut -f1)"
+	@echo ""
