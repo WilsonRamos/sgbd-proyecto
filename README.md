@@ -59,52 +59,13 @@ SGBD Físico Integrado
 │   └── Buffer Pool Manager
 │
 └── 📊 Capa de Datos
-    ├── Dataset GPS (5000+ registros)
+    ├── Dataset Data-GPS.csv (5000+ registros)
     ├── 21 campos por registro
     └── Formato CSV con parsing robusto
 ```
 
-### 📁 Estructura de Archivos
-
-```
-proyecto/
-├── src/
-│   └── main.cpp                    # Programa principal integrado
-├── include/
-│   ├── IndexManager.h              # Gestor de persistencia
-│   ├── RecordReference.h           # Referencias ligeras a registros
-│   ├── HashExtendible/
-│   │   ├── ExtensibleHash.h        # Hash Extensible principal
-│   │   ├── Directory.h             # Directorio dinámico
-│   │   ├── Bucket.h                # Buckets con capacidad
-│   │   └── HashFunction.h          # Funciones hash optimizadas
-│   ├── BPlusTree/
-│   │   ├── BPlusTree.h             # B+ Tree principal
-│   │   ├── BPlusNode.h             # Clase base para nodos
-│   │   ├── LeafNode.h              # Nodos hoja con enlaces
-│   │   ├── InternalNode.h          # Nodos internos de navegación
-│   │   └── KeyComparator.h         # Comparador de claves
-│   └── buffer/                     # Sistema de buffer existente
-├── data/
-│   └── data-GPS.csv               # Dataset GPS (generado automáticamente)
-├── bin/
-│   └── mi_disco_sgbde/            # Simulación de disco
-│       ├── metadata/              # Índices persistentes
-│       └── platter_*/             # Estructura física
-├── Makefile                       # Sistema de build completo
-└── README.md                      # Esta documentación
-```
-
 ### 🚀 Instalación y Compilación
 
-#### Prerrequisitos
-```bash
-# Compilador C++17
-sudo apt-get install g++ make
-
-# Para análisis de memoria (opcional)
-sudo apt-get install valgrind
-```
 
 #### Compilación
 ```bash
