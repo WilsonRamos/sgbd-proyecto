@@ -5,72 +5,37 @@
 #include <string>
 #include <memory>
 #include <iostream>
-#include <algorithm>
-#include <set>  
 #include <sstream>
-#include <iomanip>
+#include <algorithm>
 #include "../Record.h"
 #include "../RecordReference.h"
 
 /**
- * @brief Entrada en el bucket
- */
-struct BucketEntry {
-    std::string key;                           // Clave hash (ej: IMEI)
-    std::unique_ptr<Record> record;           // Registro completo
-    RecordReference record_ref;               // Referencia al disco
-    
-    BucketEntry(const std::string& k, std::unique_ptr<Record> r) 
-        : key(k), record(std::move(r)) {
-        // Crear RecordReference simulado
-        PhysicalAddress addr(0, 0, 0, rand() % 100);
-        record_ref = RecordReference(addr, rand() % 10);
-    }
-    
-    BucketEntry(const std::string& k, std::unique_ptr<Record> r, const RecordReference& ref)
-        : key(k), record(std::move(r)), record_ref(ref) {}
-    
-    // Constructor de movimiento
-    BucketEntry(BucketEntry&& other) noexcept 
-        : key(std::move(other.key)), record(std::move(other.record)), record_ref(other.record_ref) {}
-    
-    // Operador de asignación de movimiento
-    BucketEntry& operator=(BucketEntry&& other) noexcept {
-        if (this != &other) {
-            key = std::move(other.key);
-            record = std::move(other.record);
-            record_ref = other.record_ref;
-        }
-        return *this;
-    }
-    
-    // Eliminar constructor de copia y asignación (unique_ptr no se puede copiar)
-    BucketEntry(const BucketEntry&) = delete;
-    BucketEntry& operator=(const BucketEntry&) = delete;
-};
-
-/**
- * @brief Bucket para Hash Extensible
+ * @brief Bucket para Hash Extensible con soporte RecordReference
  * 
- * Implementación educativa del bucket que:
- * - Almacena hasta 'capacity' registros
- * - Mantiene profundidad local
- * - Soporta búsqueda, inserción y eliminación
- * - Proporciona funciones para split
+ * ✅ MEJORAS IMPLEMENTADAS:
+ * - Almacena RecordReference en lugar de Record completo
+ * - Optimiza uso de memoria en índices
+ * - Soporte para resolución lazy de registros
+ * - Manejo de profundidad local
+ * - Estadísticas detalladas para análisis educativo
  */
 class Bucket {
 private:
-    std::vector<BucketEntry> entries;         // Entradas en el bucket
-    int capacity;                             // Capacidad máxima
-    int local_depth;                          // Profundidad local del bucket
-    size_t record_count;                      // Número actual de registros
+    std::vector<std::pair<std::string, RecordReference>> entries; // Clave -> RecordReference
+    int local_depth;                                              // Profundidad local del bucket
+    int capacity;                                                 // Capacidad máxima
+    size_t access_count;                                          // Contador de accesos (estadísticas)
 
 public:
     /**
      * @brief Constructor
      */
     Bucket(int cap = 4, int depth = 0) 
-        : capacity(cap), local_depth(depth), record_count(0) {
+        : local_depth(depth)
+        , capacity(cap)
+        , access_count(0)
+    {
         entries.reserve(capacity);
     }
 
@@ -79,292 +44,378 @@ public:
     // ============================================================================
     
     /**
-     * @brief Insertar registro en el bucket
+     * @brief ✅ Inserta entrada usando RecordReference
      */
-    bool insertRecord(const std::string& key, std::unique_ptr<Record> record) {
+    bool insert(const std::string& key, const RecordReference& record_ref) {
         if (isFull()) {
-            std::cout << "   ❌ Bucket lleno (capacidad: " << capacity << ")" << std::endl;
             return false;
         }
-        
+
         // Verificar si la clave ya existe
+        for (auto& entry : entries) {
+            if (entry.first == key) {
+                // Actualizar referencia existente
+                entry.second = record_ref;
+                return true;
+            }
+        }
+
+        // Insertar nueva entrada
+        entries.emplace_back(key, record_ref);
+        return true;
+    }
+
+    /**
+     * @brief Busca una clave y retorna su RecordReference
+     */
+    bool search(const std::string& key, RecordReference& record_ref) {
+        access_count++;
+        
         for (const auto& entry : entries) {
-            if (entry.key == key) {
-                std::cout << "   ⚠️ Clave duplicada: " << key.substr(0, 15) << "..." << std::endl;
+            if (entry.first == key) {
+                record_ref = entry.second;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @brief Elimina una entrada por clave
+     */
+    bool remove(const std::string& key) {
+        auto it = std::find_if(entries.begin(), entries.end(),
+            [&key](const auto& entry) { return entry.first == key; });
+        
+        if (it != entries.end()) {
+            entries.erase(it);
+            return true;
+        }
+        return false;
+    }
+
+    // ============================================================================
+    // GESTIÓN DE SPLITS
+    // ============================================================================
+    
+    /**
+     * @brief Divide el bucket en dos cuando está lleno
+     */
+    std::shared_ptr<Bucket> split() {
+        if (!isFull()) {
+            return nullptr;
+        }
+
+        // Crear nuevo bucket con profundidad local incrementada
+        auto new_bucket = std::make_shared<Bucket>(capacity, local_depth + 1);
+        
+        // Incrementar profundidad local del bucket actual
+        local_depth++;
+
+        // Redistribuir entradas basado en el nuevo bit
+        std::vector<std::pair<std::string, RecordReference>> old_entries = entries;
+        entries.clear();
+
+        size_t bit_mask = 1ULL << (local_depth - 1);
+
+        for (const auto& entry : old_entries) {
+            size_t hash_val = std::hash<std::string>{}(entry.first);
+            
+            if (hash_val & bit_mask) {
+                // Va al nuevo bucket
+                new_bucket->entries.push_back(entry);
+            } else {
+                // Se queda en el bucket actual
+                entries.push_back(entry);
+            }
+        }
+
+        std::cout << "🔄 Bucket split: " << entries.size() << " + " 
+                  << new_bucket->entries.size() << " entradas" << std::endl;
+
+        return new_bucket;
+    }
+
+    /**
+     * @brief Verifica si el bucket necesita split para nueva entrada
+     */
+    bool needsSplit(const std::string& key) const {
+        if (!isFull()) {
+            return false;
+        }
+
+        // Verificar si la clave ya existe (no necesita split)
+        for (const auto& entry : entries) {
+            if (entry.first == key) {
                 return false;
             }
         }
-        
-        // Usar std::move para transferir ownership
-        entries.emplace_back(key, std::move(record));
-        record_count++;
-        
-        std::cout << "   ✅ Registro insertado: " << key.substr(0, 15) 
-                  << "... (Total: " << record_count << "/" << capacity << ")" << std::endl;
-        
-        return true;
+
+        return true; // Bucket lleno y clave nueva
     }
-    
-    /**
-     * @brief Insertar registro (sobrecarga para compatibilidad)
-     */
-    bool insert(const std::string& key, std::unique_ptr<Record> record) {
-        return insertRecord(key, std::move(record));
-    }
-    
-    /**
-     * @brief Buscar registro por clave
-     */
-    bool search(const std::string& key, Record& result) {
-        for (const auto& entry : entries) {
-            if (entry.key == key) {
-                // Crear copia del registro para el resultado
-                result = *entry.record;
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    /**
-     * @brief ✅ FUNCIÓN AGREGADA - Buscar y obtener RecordReference
-     */
-    bool searchReference(const std::string& key, RecordReference& record_ref) {
-        for (const auto& entry : entries) {
-            if (entry.key == key) {
-                record_ref = entry.record_ref;
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    /**
-     * @brief Eliminar registro por clave
-     */
-    bool remove(const std::string& key) {
-        auto it = std::remove_if(entries.begin(), entries.end(),
-            [&key](const BucketEntry& entry) {
-                return entry.key == key;
-            });
-        
-        if (it != entries.end()) {
-            entries.erase(it, entries.end());
-            record_count--;
-            std::cout << "   🗑️ Registro eliminado: " << key.substr(0, 15) << "..." << std::endl;
-            return true;
-        }
-        
-        return false;
-    }
-    
+
     // ============================================================================
-    // OPERACIONES PARA SPLIT Y EXTRACCIÓN
+    // ESTADO Y PROPIEDADES
+    // ============================================================================
+    
+    bool isFull() const { return entries.size() >= static_cast<size_t>(capacity); }
+    bool isEmpty() const { return entries.empty(); }
+    size_t size() const { return entries.size(); }
+    int getCapacity() const { return capacity; }
+    int getLocalDepth() const { return local_depth; }
+    void setLocalDepth(int depth) { local_depth = depth; }
+    size_t getAccessCount() const { return access_count; }
+
+    /**
+     * @brief Factor de ocupación del bucket
+     */
+    double getOccupancyFactor() const {
+        return static_cast<double>(entries.size()) / capacity;
+    }
+
+    // ============================================================================
+    // ACCESO A DATOS
     // ============================================================================
     
     /**
-     * @brief ✅ FUNCIÓN AGREGADA - Obtiene todas las claves del bucket
+     * @brief Obtiene todas las claves en el bucket
      */
     std::vector<std::string> getAllKeys() const {
         std::vector<std::string> keys;
         keys.reserve(entries.size());
         
         for (const auto& entry : entries) {
-            keys.push_back(entry.key);
+            keys.push_back(entry.first);
         }
         
         return keys;
     }
-    
+
     /**
-     * @brief Obtiene todos los registros (para redistribución)
+     * @brief Obtiene todas las referencias en el bucket
      */
-    std::vector<std::reference_wrapper<BucketEntry>> getAllRecords() {
-        std::vector<std::reference_wrapper<BucketEntry>> refs;
-        for (auto& entry : entries) {
-            refs.push_back(std::ref(entry));
+    std::vector<RecordReference> getAllReferences() const {
+        std::vector<RecordReference> refs;
+        refs.reserve(entries.size());
+        
+        for (const auto& entry : entries) {
+            refs.push_back(entry.second);
         }
+        
         return refs;
     }
-    
+
     /**
-     * @brief ✅ FUNCIÓN AGREGADA - Extrae todas las entradas (para redistribución)
+     * @brief Obtiene todas las entradas (clave, referencia)
      */
-    std::vector<BucketEntry> extractAllEntries() {
-        std::vector<BucketEntry> extracted_entries;
-        extracted_entries.reserve(entries.size());
-        
-        // Mover todas las entradas al vector de extracción
-        for (auto& entry : entries) {
-            extracted_entries.emplace_back(std::move(entry));
-        }
-        
-        // Limpiar el bucket
-        entries.clear();
-        record_count = 0;
-        
-        return extracted_entries;
+    const std::vector<std::pair<std::string, RecordReference>>& getAllEntries() const {
+        return entries;
     }
-    
+
     /**
-     * @brief Limpia el bucket
+     * @brief Cuenta registros válidos
      */
-    void clear() {
-        entries.clear();
-        record_count = 0;
-        std::cout << "   🧹 Bucket limpiado" << std::endl;
-    }
-    
-    /**
-     * @brief Incrementa la profundidad local
-     */
-    void incrementLocalDepth() {
-        local_depth++;
-        std::cout << "   📈 Profundidad local incrementada a: " << local_depth << std::endl;
-    }
-    
-    // ============================================================================
-    // GETTERS Y ESTADO
-    // ============================================================================
-    
-    bool isFull() const { return record_count >= capacity; }
-    bool isEmpty() const { return record_count == 0; }
-    size_t getRecordCount() const { return record_count; }
-    int getLocalDepth() const { return local_depth; }
-    int getCapacity() const { return capacity; }
-    
-    /**
-     * @brief Obtiene factor de carga del bucket
-     */
-    double getLoadFactor() const {
-        return capacity > 0 ? (double)record_count / capacity : 0.0;
-    }
-    
-    // ============================================================================
-    // VALIDACIÓN Y DEPURACIÓN
-    // ============================================================================
-    
-    /**
-     * @brief Valida integridad del bucket
-     */
-    bool validateIntegrity() const {
-        // Verificar que no hay claves duplicadas
-        std::set<std::string> unique_keys;
+    size_t getRecordCount() const {
+        size_t valid_count = 0;
         for (const auto& entry : entries) {
-            if (unique_keys.find(entry.key) != unique_keys.end()) {
-                std::cout << "❌ Clave duplicada encontrada: " << entry.key << std::endl;
-                return false;
+            if (entry.second.isValid()) {
+                valid_count++;
             }
-            unique_keys.insert(entry.key);
+        }
+        return valid_count;
+    }
+
+    // ============================================================================
+    // SERIALIZACIÓN PARA PERSISTENCIA
+    // ============================================================================
+    
+    /**
+     * @brief Serializa el bucket para guardar en disco
+     */
+    std::string serialize() const {
+        std::ostringstream oss;
+        
+        oss << "BUCKET|" << local_depth << "|" << capacity << "|" << entries.size() << std::endl;
+        
+        for (const auto& entry : entries) {
+            oss << "ENTRY|" << entry.first << "|" << entry.second.serialize() << std::endl;
         }
         
-        // Verificar consistencia de contadores
-        if (entries.size() != record_count) {
-            std::cout << "❌ Inconsistencia en contadores: entries=" << entries.size() 
-                      << ", record_count=" << record_count << std::endl;
-            return false;
-        }
+        return oss.str();
+    }
+
+    /**
+     * @brief Deserializa bucket desde string
+     */
+    bool deserialize(const std::string& data) {
+        std::istringstream iss(data);
+        std::string line;
         
-        // Verificar capacidad
-        if (record_count > capacity) {
-            std::cout << "❌ Bucket sobrecargado: " << record_count << "/" << capacity << std::endl;
-            return false;
+        entries.clear();
+        
+        while (std::getline(iss, line)) {
+            if (line.empty()) continue;
+            
+            std::istringstream line_stream(line);
+            std::string type;
+            std::getline(line_stream, type, '|');
+            
+            if (type == "BUCKET") {
+                std::string depth_str, cap_str, size_str;
+                std::getline(line_stream, depth_str, '|');
+                std::getline(line_stream, cap_str, '|');
+                std::getline(line_stream, size_str, '|');
+                
+                local_depth = std::stoi(depth_str);
+                capacity = std::stoi(cap_str);
+                
+            } else if (type == "ENTRY") {
+                std::string key, ref_data;
+                std::getline(line_stream, key, '|');
+                std::getline(line_stream, ref_data);
+                
+                RecordReference record_ref;
+                if (record_ref.deserialize(ref_data)) {
+                    entries.emplace_back(key, record_ref);
+                }
+            }
         }
         
         return true;
     }
+
+    // ============================================================================
+    // VISUALIZACIÓN Y DEBUG
+    // ============================================================================
     
     /**
-     * @brief Muestra contenido del bucket
+     * @brief Muestra contenido del bucket (educativo)
      */
     void display() const {
-        std::cout << "📦 Bucket (Profundidad local: " << local_depth 
-                  << ", Registros: " << record_count << "/" << capacity << ")" << std::endl;
+        std::cout << "  📦 Bucket (Local Depth: " << local_depth 
+                  << ", Size: " << entries.size() << "/" << capacity << ")" << std::endl;
         
         for (size_t i = 0; i < entries.size(); i++) {
-            std::cout << "   [" << i << "] " << entries[i].key.substr(0, 20) 
-                      << "... → " << entries[i].record_ref.toString() << std::endl;
+            const auto& entry = entries[i];
+            std::cout << "    [" << i << "] " << entry.first 
+                      << " -> " << entry.second.toString() << std::endl;
+        }
+        
+        if (entries.empty()) {
+            std::cout << "    (vacío)" << std::endl;
         }
     }
-    
+
     /**
-     * @brief Obtiene estadísticas del bucket
+     * @brief Información detallada del bucket
      */
-    std::string getStatistics() const {
-        std::ostringstream ss;
-        ss << "Bucket Statistics:\n";
-        ss << "  Local Depth: " << local_depth << "\n";
-        ss << "  Records: " << record_count << "/" << capacity << "\n";
-        ss << "  Load Factor: " << std::fixed << std::setprecision(2) << getLoadFactor() << "\n";
-        ss << "  Is Full: " << (isFull() ? "Yes" : "No") << "\n";
-        ss << "  Is Empty: " << (isEmpty() ? "Yes" : "No") << "\n";
-        return ss.str();
+    void displayDetailed() const {
+        std::cout << "\n📦 BUCKET DETALLADO:" << std::endl;
+        std::cout << "   Profundidad local: " << local_depth << std::endl;
+        std::cout << "   Capacidad: " << capacity << std::endl;
+        std::cout << "   Entradas: " << entries.size() << std::endl;
+        std::cout << "   Ocupación: " << std::fixed << std::setprecision(1) 
+                  << (getOccupancyFactor() * 100) << "%" << std::endl;
+        std::cout << "   Accesos: " << access_count << std::endl;
+        std::cout << "   Estado: " << (isFull() ? "LLENO" : (isEmpty() ? "VACÍO" : "PARCIAL")) << std::endl;
+
+        if (!entries.empty()) {
+            std::cout << "\n   Entradas:" << std::endl;
+            for (size_t i = 0; i < entries.size(); i++) {
+                const auto& entry = entries[i];
+                size_t hash_val = std::hash<std::string>{}(entry.first);
+                
+                std::cout << "   [" << i << "] Key: " << entry.first 
+                          << " | Hash: " << hash_val 
+                          << " | Valid: " << (entry.second.isValid() ? "✓" : "✗") << std::endl;
+            }
+        }
     }
-    
+
+    /**
+     * @brief Estadísticas del bucket
+     */
+    struct BucketStats {
+        size_t entry_count;
+        int local_depth;
+        int capacity;
+        double occupancy_factor;
+        size_t access_count;
+        bool is_full;
+        bool is_empty;
+        size_t valid_references;
+    };
+
+    BucketStats getStats() const {
+        BucketStats stats;
+        stats.entry_count = entries.size();
+        stats.local_depth = local_depth;
+        stats.capacity = capacity;
+        stats.occupancy_factor = getOccupancyFactor();
+        stats.access_count = access_count;
+        stats.is_full = isFull();
+        stats.is_empty = isEmpty();
+        stats.valid_references = getRecordCount();
+        
+        return stats;
+    }
+
     // ============================================================================
-    // ✅ FUNCIONES AGREGADAS - ANÁLISIS Y BÚSQUEDA AVANZADA
+    // OPERACIONES AVANZADAS
     // ============================================================================
     
     /**
-     * @brief Busca múltiples claves de una vez
+     * @brief Reorganiza entradas por clave (optimización)
      */
-    std::vector<RecordReference> searchMultiple(const std::vector<std::string>& keys) {
-        std::vector<RecordReference> results;
-        results.reserve(keys.size());
-        
-        for (const auto& key : keys) {
-            RecordReference ref;
-            if (searchReference(key, ref)) {
-                results.push_back(ref);
-            }
-        }
-        
-        return results;
+    void sortEntries() {
+        std::sort(entries.begin(), entries.end(),
+            [](const auto& a, const auto& b) {
+                return a.first < b.first;
+            });
     }
-    
+
     /**
-     * @brief Obtiene estadísticas de distribución de claves
+     * @brief Limpia referencias inválidas
      */
-    std::map<char, int> getKeyPrefixDistribution() const {
-        std::map<char, int> distribution;
+    size_t cleanInvalidReferences() {
+        size_t removed = 0;
         
-        for (const auto& entry : entries) {
-            if (!entry.key.empty()) {
-                char prefix = entry.key[0];
-                distribution[prefix]++;
-            }
-        }
+        entries.erase(
+            std::remove_if(entries.begin(), entries.end(),
+                [&removed](const auto& entry) {
+                    if (!entry.second.isValid()) {
+                        removed++;
+                        return true;
+                    }
+                    return false;
+                }),
+            entries.end()
+        );
         
-        return distribution;
+        return removed;
     }
-    
+
     /**
-     * @brief Verifica si el bucket contiene una clave específica
+     * @brief Verifica consistencia interna del bucket
      */
-    bool containsKey(const std::string& key) const {
-        for (const auto& entry : entries) {
-            if (entry.key == key) {
-                return true;
-            }
+    bool validateConsistency() const {
+        // Verificar capacidad
+        if (entries.size() > static_cast<size_t>(capacity)) {
+            std::cout << "❌ Bucket excede capacidad: " << entries.size() << " > " << capacity << std::endl;
+            return false;
         }
-        return false;
-    }
-    
-    /**
-     * @brief Obtiene información detallada de una entrada específica
-     */
-    std::string getEntryInfo(const std::string& key) const {
+
+        // Verificar claves únicas
+        std::set<std::string> unique_keys;
         for (const auto& entry : entries) {
-            if (entry.key == key) {
-                std::ostringstream ss;
-                ss << "Entry Info for key: " << key << "\n";
-                ss << "  Record Reference: " << entry.record_ref.toString() << "\n";
-                ss << "  Record Size: " << entry.record->getSize() << " bytes\n";
-                ss << "  Bucket Local Depth: " << local_depth << "\n";
-                return ss.str();
+            if (unique_keys.find(entry.first) != unique_keys.end()) {
+                std::cout << "❌ Clave duplicada en bucket: " << entry.first << std::endl;
+                return false;
             }
+            unique_keys.insert(entry.first);
         }
-        return "Entry not found for key: " + key;
+
+        return true;
     }
 };
 

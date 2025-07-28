@@ -3,187 +3,268 @@
 
 #include <string>
 #include <functional>
-#include <cstdint>
+#include <iostream>
+#include <iomanip>
+#include <sstream>
 
 /**
- * @brief Funciones hash especializadas para Hash Extensible
+ * @brief HashFunction - Función hash especializada para Hash Extensible
  * 
- * Proporciona diferentes algoritmos de hash optimizados para:
- * - IMEI (strings numéricos largos)
- * - Strings generales
- * - Distribución uniforme en buckets
+ * Implementa funciones hash específicas para el contexto educativo:
+ * - Hash para IMEI (strings numéricos largos)
+ * - Hash para timestamps (strings de fecha/hora)
+ * - Funciones auxiliares para análisis de distribución
+ * - Visualización de bits para propósitos educativos
  */
 class HashFunction {
 public:
     /**
-     * @brief Hash estándar usando std::hash
+     * @brief Función hash principal para strings (compatible con std::hash)
      */
-    static size_t standardHash(const std::string& key) {
+    static size_t hash(const std::string& key) {
         return std::hash<std::string>{}(key);
     }
-    
+
     /**
-     * @brief Hash optimizado para IMEI (15 dígitos)
-     * Usa características específicas de IMEI para mejor distribución
+     * @brief Hash especializado para IMEI (15 dígitos)
+     * 
+     * Los IMEI tienen estructura específica:
+     * - 8 primeros dígitos: Type Allocation Code (TAC)
+     * - 6 siguientes: Serial Number
+     * - 1 último: Check digit
+     * 
+     * Esta función hash aprovecha esta estructura para mejor distribución
      */
-    static size_t imeiHash(const std::string& imei) {
-        if (imei.length() < 10) {
-            return standardHash(imei);
+    static size_t hashIMEI(const std::string& imei) {
+        if (imei.length() != 15) {
+            // Fallback a hash estándar si no es IMEI válido
+            return hash(imei);
         }
-        
+
         // Combinar diferentes partes del IMEI
-        uint64_t hash = 0;
-        
-        // Parte 1: TAC (Type Allocation Code) - primeros 8 dígitos
-        for (int i = 0; i < 8 && i < imei.length(); i++) {
-            hash = hash * 31 + (imei[i] - '0');
-        }
-        
-        // Parte 2: SNR (Serial Number) - siguientes 6 dígitos
-        for (int i = 8; i < 14 && i < imei.length(); i++) {
-            hash = hash * 37 + (imei[i] - '0');
-        }
-        
-        // Parte 3: Check digit (último dígito)
-        if (imei.length() >= 15) {
-            hash = hash * 41 + (imei[14] - '0');
-        }
-        
-        return static_cast<size_t>(hash);
+        size_t tac_hash = std::hash<std::string>{}(imei.substr(0, 8));    // TAC
+        size_t serial_hash = std::hash<std::string>{}(imei.substr(8, 6)); // Serial
+        size_t check_hash = std::hash<char>{}(imei[14]);                   // Check digit
+
+        // Combinar usando XOR y shifts para mejor distribución
+        return tac_hash ^ (serial_hash << 8) ^ (check_hash << 16);
     }
-    
+
     /**
-     * @brief Hash Fowler-Noll-Vo (FNV-1a) - distribución uniforme
+     * @brief Hash especializado para timestamps
      */
-    static size_t fnvHash(const std::string& key) {
-        const uint64_t FNV_OFFSET_BASIS = 14695981039346656037ULL;
-        const uint64_t FNV_PRIME = 1099511628211ULL;
-        
-        uint64_t hash = FNV_OFFSET_BASIS;
-        
-        for (char c : key) {
-            hash ^= static_cast<uint64_t>(c);
-            hash *= FNV_PRIME;
-        }
-        
-        return static_cast<size_t>(hash);
-    }
-    
-    /**
-     * @brief Hash MurmurHash3 simplificado - alta calidad
-     */
-    static size_t murmurHash(const std::string& key) {
-        const uint32_t seed = 0x9747b28c;
-        const uint32_t m = 0x5bd1e995;
-        const int r = 24;
-        
-        uint32_t len = static_cast<uint32_t>(key.length());
-        uint32_t h = seed ^ len;
-        
-        const unsigned char* data = reinterpret_cast<const unsigned char*>(key.c_str());
-        
-        while (len >= 4) {
-            uint32_t k = *(uint32_t*)data;
+    static size_t hashTimestamp(const std::string& timestamp) {
+        // Para timestamps en formato: "YYYY-MM-DD HH:MM:SS"
+        if (timestamp.length() >= 19) {
+            // Extraer componentes de tiempo
+            std::string date_part = timestamp.substr(0, 10);     // YYYY-MM-DD
+            std::string time_part = timestamp.substr(11, 8);     // HH:MM:SS
             
-            k *= m;
-            k ^= k >> r;
-            k *= m;
+            size_t date_hash = hash(date_part);
+            size_t time_hash = hash(time_part);
             
-            h *= m;
-            h ^= k;
-            
-            data += 4;
-            len -= 4;
+            return date_hash ^ (time_hash << 12);
         }
         
-        // Handle remaining bytes
-        switch (len) {
-            case 3: h ^= data[2] << 16;
-            case 2: h ^= data[1] << 8;
-            case 1: h ^= data[0];
-                    h *= m;
+        return hash(timestamp);
+    }
+
+    /**
+     * @brief Obtiene los últimos 'depth' bits de un valor hash
+     */
+    static size_t getBits(size_t hash_value, int depth) {
+        if (depth <= 0) return 0;
+        if (depth >= 64) return hash_value;
+        
+        size_t mask = (1ULL << depth) - 1;
+        return hash_value & mask;
+    }
+
+    /**
+     * @brief Convierte valor hash a representación binaria (educativo)
+     */
+    static std::string toBinaryString(size_t hash_value, int bits = 8) {
+        std::string binary;
+        for (int i = bits - 1; i >= 0; i--) {
+            binary += ((hash_value >> i) & 1) ? '1' : '0';
         }
-        
-        h ^= h >> 13;
-        h *= m;
-        h ^= h >> 15;
-        
-        return static_cast<size_t>(h);
+        return binary;
     }
-    
+
     /**
-     * @brief Hash con máscara para profundidad específica
+     * @brief Análisis de distribución de hash (educativo)
      */
-    static size_t hashWithDepth(const std::string& key, int depth) {
-        size_t hash = fnvHash(key);
-        size_t mask = (1 << depth) - 1;  // Máscara de 'depth' bits
-        return hash & mask;
-    }
-    
-    /**
-     * @brief Hash para distribución en directorio de Hash Extensible
-     */
-    static size_t directoryHash(const std::string& key, int global_depth) {
-        return hashWithDepth(key, global_depth);
-    }
-    
-    /**
-     * @brief Hash para comparación y debugging
-     */
-    static std::string hashInfo(const std::string& key) {
-        std::string info = "Hash info for '" + key.substr(0, 20) + "':\n";
-        info += "  Standard: " + std::to_string(standardHash(key)) + "\n";
-        info += "  FNV-1a:   " + std::to_string(fnvHash(key)) + "\n";
-        info += "  Murmur:   " + std::to_string(murmurHash(key)) + "\n";
-        
-        if (key.length() >= 10 && std::all_of(key.begin(), key.end(), ::isdigit)) {
-            info += "  IMEI:     " + std::to_string(imeiHash(key)) + "\n";
-        }
-        
-        return info;
-    }
-    
-    /**
-     * @brief Verifica calidad de distribución para un conjunto de claves
-     */
-    static double calculateDistributionQuality(const std::vector<std::string>& keys, int num_buckets) {
-        std::vector<int> bucket_counts(num_buckets, 0);
-        
+    static void analyzeHashDistribution(const std::vector<std::string>& keys, int depth = 3) {
+        std::cout << "\n🔍 ANÁLISIS DE DISTRIBUCIÓN HASH (Depth = " << depth << "):" << std::endl;
+        std::cout << "=" << std::string(50, '=') << std::endl;
+
+        std::map<size_t, int> bucket_distribution;
+        size_t total_buckets = 1ULL << depth;
+
+        // Contar distribución
         for (const auto& key : keys) {
-            size_t hash = fnvHash(key);
-            int bucket = hash % num_buckets;
-            bucket_counts[bucket]++;
+            size_t hash_val = hash(key);
+            size_t bucket_index = getBits(hash_val, depth);
+            bucket_distribution[bucket_index]++;
         }
-        
-        // Calcular desviación estándar de la distribución
-        double mean = static_cast<double>(keys.size()) / num_buckets;
+
+        // Mostrar distribución
+        std::cout << "Bucket | Count | Percentage | Binary | Hash Examples" << std::endl;
+        std::cout << "-------|-------|------------|--------|---------------" << std::endl;
+
+        for (size_t i = 0; i < total_buckets; i++) {
+            int count = bucket_distribution[i];
+            double percentage = (count * 100.0) / keys.size();
+            std::string binary = toBinaryString(i, depth);
+
+            std::cout << std::setw(6) << i << " | ";
+            std::cout << std::setw(5) << count << " | ";
+            std::cout << std::setw(9) << std::fixed << std::setprecision(1) << percentage << "% | ";
+            std::cout << std::setw(6) << binary << " | ";
+
+            // Mostrar hasta 3 ejemplos de claves que van a este bucket
+            int examples_shown = 0;
+            for (const auto& key : keys) {
+                if (examples_shown >= 3) break;
+                
+                size_t hash_val = hash(key);
+                if (getBits(hash_val, depth) == i) {
+                    if (examples_shown > 0) std::cout << ", ";
+                    std::cout << key.substr(0, 8) << "...";
+                    examples_shown++;
+                }
+            }
+            std::cout << std::endl;
+        }
+
+        // Estadísticas de distribución
+        std::cout << "\n📊 ESTADÍSTICAS:" << std::endl;
+        double expected_per_bucket = static_cast<double>(keys.size()) / total_buckets;
         double variance = 0.0;
-        
-        for (int count : bucket_counts) {
-            double diff = count - mean;
+
+        for (size_t i = 0; i < total_buckets; i++) {
+            int count = bucket_distribution[i];
+            double diff = count - expected_per_bucket;
             variance += diff * diff;
         }
+        variance /= total_buckets;
+
+        std::cout << "   Keys totales: " << keys.size() << std::endl;
+        std::cout << "   Buckets totales: " << total_buckets << std::endl;
+        std::cout << "   Promedio por bucket: " << std::fixed << std::setprecision(2) << expected_per_bucket << std::endl;
+        std::cout << "   Varianza: " << std::fixed << std::setprecision(2) << variance << std::endl;
+        std::cout << "   Desviación estándar: " << std::fixed << std::setprecision(2) << std::sqrt(variance) << std::endl;
+    }
+
+    /**
+     * @brief Muestra información de hash para una clave específica (educativo)
+     */
+    static void showHashInfo(const std::string& key, int max_depth = 5) {
+        size_t hash_val = hash(key);
         
-        variance /= num_buckets;
-        double stddev = std::sqrt(variance);
-        
-        // Retornar coeficiente de variación (lower is better)
-        return stddev / mean;
+        std::cout << "\n🔍 INFORMACIÓN DE HASH PARA: '" << key << "'" << std::endl;
+        std::cout << "=" << std::string(40, '=') << std::endl;
+        std::cout << "Hash value: " << hash_val << std::endl;
+        std::cout << "Hash hex: 0x" << std::hex << hash_val << std::dec << std::endl;
+        std::cout << "Hash binary (64 bits): " << toBinaryString(hash_val, 64) << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "Bucket assignment por depth:" << std::endl;
+        std::cout << "Depth | Bucket | Binary | Hex" << std::endl;
+        std::cout << "------|--------|--------|----" << std::endl;
+
+        for (int depth = 1; depth <= max_depth; depth++) {
+            size_t bucket = getBits(hash_val, depth);
+            std::string binary = toBinaryString(bucket, depth);
+            
+            std::cout << std::setw(5) << depth << " | ";
+            std::cout << std::setw(6) << bucket << " | ";
+            std::cout << std::setw(6) << binary << " | ";
+            std::cout << "0x" << std::hex << bucket << std::dec << std::endl;
+        }
+    }
+
+    /**
+     * @brief Predictor de splits (educativo)
+     */
+    static bool willCauseDirectorySplit(const std::vector<std::string>& current_keys, 
+                                       const std::string& new_key, 
+                                       int global_depth, 
+                                       int bucket_capacity) {
+        // Determinar bucket donde iría la nueva clave
+        size_t new_key_hash = hash(new_key);
+        size_t bucket_index = getBits(new_key_hash, global_depth);
+
+        // Contar cuántas claves actuales van al mismo bucket
+        int current_count = 0;
+        for (const auto& key : current_keys) {
+            size_t key_hash = hash(key);
+            if (getBits(key_hash, global_depth) == bucket_index) {
+                current_count++;
+            }
+        }
+
+        return (current_count + 1) > bucket_capacity;
+    }
+
+    /**
+     * @brief Función hash alternativa para testing
+     */
+    static size_t simpleHash(const std::string& key) {
+        size_t hash_val = 5381;
+        for (char c : key) {
+            hash_val = ((hash_val << 5) + hash_val) + c;
+        }
+        return hash_val;
+    }
+
+    /**
+     * @brief Hash con semilla personalizada
+     */
+    static size_t hashWithSeed(const std::string& key, size_t seed) {
+        size_t hash_val = seed;
+        for (char c : key) {
+            hash_val ^= std::hash<char>{}(c) + 0x9e3779b9 + (hash_val << 6) + (hash_val >> 2);
+        }
+        return hash_val;
+    }
+
+    /**
+     * @brief Estadísticas de colisión para diferentes profundidades
+     */
+    static void analyzeCollisions(const std::vector<std::string>& keys) {
+        std::cout << "\n⚠️ ANÁLISIS DE COLISIONES:" << std::endl;
+        std::cout << "Depth | Buckets | Collisions | Max per bucket" << std::endl;
+        std::cout << "------|---------|------------|---------------" << std::endl;
+
+        for (int depth = 1; depth <= 6; depth++) {
+            size_t total_buckets = 1ULL << depth;
+            std::vector<int> bucket_counts(total_buckets, 0);
+            
+            // Contar elementos por bucket
+            for (const auto& key : keys) {
+                size_t hash_val = hash(key);
+                size_t bucket_index = getBits(hash_val, depth);
+                bucket_counts[bucket_index]++;
+            }
+            
+            // Calcular estadísticas
+            int collisions = 0;
+            int max_per_bucket = 0;
+            
+            for (int count : bucket_counts) {
+                if (count > 1) {
+                    collisions += count - 1;
+                }
+                max_per_bucket = std::max(max_per_bucket, count);
+            }
+            
+            std::cout << std::setw(5) << depth << " | ";
+            std::cout << std::setw(7) << total_buckets << " | ";
+            std::cout << std::setw(10) << collisions << " | ";
+            std::cout << std::setw(14) << max_per_bucket << std::endl;
+        }
     }
 };
-
-/**
- * @brief Función hash por defecto para Hash Extensible
- */
-inline size_t defaultExtensibleHash(const std::string& key) {
-    return HashFunction::fnvHash(key);
-}
-
-/**
- * @brief Función hash especializada para IMEI
- */
-inline size_t imeiExtensibleHash(const std::string& imei) {
-    return HashFunction::imeiHash(imei);
-}
 
 #endif // HASH_FUNCTION_H

@@ -2,31 +2,34 @@
 #define INTERNAL_NODE_H
 
 #include "BPlusNode.h"
-#include "../RecordReference.h"
+#include "KeyComparator.h"
+#include <memory>
 #include <iostream>
+#include <algorithm>
 
 /**
  * @brief Nodo interno del B+ Tree
  * 
- * Características especiales:
- * - No almacena datos, solo claves de navegación
- * - Mantiene punteros a nodos hijo
- * - Siempre tiene un hijo más que claves
- * - Responsable de la navegación en el árbol
+ * Características:
+ * - No almacena RecordReference (solo en hojas)
+ * - Tiene punteros a nodos hijos
+ * - Las claves son separadores/guías
+ * - Número de hijos = número de claves + 1
+ * - Facilita navegación hacia hojas correctas
  */
 template<typename KeyType>
 class InternalNode : public BPlusNode<KeyType> {
 private:
-    std::vector<BPlusNode<KeyType>*> children; // Punteros a nodos hijo
+    std::vector<std::shared_ptr<BPlusNode<KeyType>>> children; // Punteros a hijos
 
 public:
     /**
      * @brief Constructor
      */
     InternalNode(int order) : BPlusNode<KeyType>(order, false) {
-        children.reserve(order); // Un nodo interno puede tener hasta 'order' hijos
+        children.reserve(order);
     }
-    
+
     /**
      * @brief Destructor
      */
@@ -42,309 +45,294 @@ public:
     bool isLeaf() const override { 
         return false; 
     }
-    
+
     /**
-     * @brief Inserta una clave (delega a los hijos apropiados)
+     * @brief Inserta una clave en el nodo interno
+     * NOTA: Los nodos internos no insertan directamente, sino que redirigen
      */
     bool insert(const KeyType& key, const RecordReference& record_ref) override {
-        // Los nodos internos no insertan directamente, delegan a sus hijos
-        BPlusNode<KeyType>* child = findChild(key);
-        
+        // Los nodos internos no insertan directamente
+        // Esta función es principalmente para compatibilidad
+        auto child = findChildForKey(key);
         if (child) {
             return child->insert(key, record_ref);
         }
-        
         return false;
     }
-    
+
     /**
-     * @brief Busca una clave (navega hacia los hijos apropiados)
+     * @brief Busca una clave navegando hacia el hijo apropiado
      */
     bool search(const KeyType& key, RecordReference& record_ref) override {
-        BPlusNode<KeyType>* child = findChild(key);
-        
+        auto child = findChildForKey(key);
         if (child) {
             return child->search(key, record_ref);
         }
-        
         return false;
     }
-    
+
     /**
-     * @brief Elimina una clave (delega a los hijos apropiados)
+     * @brief Elimina una clave (redirige al hijo apropiado)
      */
     bool remove(const KeyType& key) override {
-        BPlusNode<KeyType>* child = findChild(key);
-        
+        auto child = findChildForKey(key);
         if (child) {
             return child->remove(key);
         }
-        
         return false;
     }
-    
+
     /**
-     * @brief Divide el nodo interno cuando está lleno
+     * @brief División de nodo interno cuando está lleno
      */
     BPlusNode<KeyType>* split() override {
         if (!this->isFull()) {
             return nullptr;
         }
-        
+
         int mid = this->order / 2;
         auto new_internal = new InternalNode<KeyType>(this->order);
-        
-        // La clave del medio sube al padre, no se incluye en ningún nodo
+
+        // La clave del medio sube al padre
         KeyType middle_key = this->keys[mid];
-        
-        // Mover claves de la derecha al nuevo nodo (excluyendo la del medio)
+
+        // Mover claves de la mitad derecha al nuevo nodo
         new_internal->keys.assign(this->keys.begin() + mid + 1, this->keys.end());
         
         // Mover hijos correspondientes
         new_internal->children.assign(children.begin() + mid + 1, children.end());
-        
+
         // Actualizar padres de los hijos movidos
-        for (auto* child : new_internal->children) {
+        for (auto& child : new_internal->children) {
             child->setParent(new_internal);
         }
-        
-        // Mantener la mitad izquierda (sin la clave del medio)
+
+        // Mantener la mitad izquierda
         this->keys.resize(mid);
         children.resize(mid + 1);
-        
+
         // Establecer padre
         new_internal->setParent(this->getParent());
-        
+
         std::cout << "🌳 Nodo interno dividido: " << this->keys.size() 
                   << " + " << new_internal->keys.size() << " claves" << std::endl;
-        std::cout << "   Clave promocionada: " << middle_key << std::endl;
-        
+        std::cout << "   Clave promovida: " << middle_key << std::endl;
+
         return new_internal;
     }
 
     // ============================================================================
     // GESTIÓN DE HIJOS
     // ============================================================================
-    
-    /**
-     * @brief Encuentra el hijo apropiado para una clave
-     */
-    BPlusNode<KeyType>* findChild(const KeyType& key) {
-        if (children.empty()) {
-            return nullptr;
-        }
-        
-        // Encontrar el índice del primer hijo apropiado
-        int index = 0;
-        while (index < static_cast<int>(this->keys.size()) && 
-               KeyComparator<KeyType>::compare(key, this->keys[index]) >= 0) {
-            index++;
-        }
-        
-        // El hijo está en la posición 'index'
-        if (index < static_cast<int>(children.size())) {
-            return children[index];
-        }
-        
-        return nullptr;
-    }
-    
+
     /**
      * @brief Añade un hijo al nodo
      */
-    void addChild(BPlusNode<KeyType>* child) {
-        if (child) {
+    void addChild(std::shared_ptr<BPlusNode<KeyType>> child) {
+        if (children.size() < static_cast<size_t>(this->order)) {
             children.push_back(child);
             child->setParent(this);
         }
     }
-    
+
     /**
      * @brief Inserta un hijo en una posición específica
      */
-    void insertChild(int index, BPlusNode<KeyType>* child) {
-        if (child && index >= 0 && index <= static_cast<int>(children.size())) {
+    void insertChild(size_t index, std::shared_ptr<BPlusNode<KeyType>> child) {
+        if (index <= children.size()) {
             children.insert(children.begin() + index, child);
             child->setParent(this);
         }
     }
-    
+
     /**
-     * @brief Remueve un hijo
+     * @brief Obtiene un hijo por índice
      */
-    bool removeChild(BPlusNode<KeyType>* child) {
-        auto it = std::find(children.begin(), children.end(), child);
-        if (it != children.end()) {
-            (*it)->setParent(nullptr);
-            children.erase(it);
-            return true;
-        }
-        return false;
-    }
-    
-    /**
-     * @brief Obtiene todos los hijos
-     */
-    const std::vector<BPlusNode<KeyType>*>& getChildren() const {
-        return children;
-    }
-    
-    /**
-     * @brief Obtiene un hijo específico por índice
-     */
-    BPlusNode<KeyType>* getChild(size_t index) const {
+    std::shared_ptr<BPlusNode<KeyType>> getChild(size_t index) const {
         if (index < children.size()) {
             return children[index];
         }
         return nullptr;
     }
-    
+
     /**
-     * @brief Obtiene el número de hijos
+     * @brief Encuentra el hijo apropiado para una clave
      */
-    size_t getChildCount() const {
-        return children.size();
+    std::shared_ptr<BPlusNode<KeyType>> findChildForKey(const KeyType& key) const {
+        size_t i = 0;
+        
+        // Encontrar la posición donde la clave debería ir
+        while (i < this->keys.size() && KeyComparator<KeyType>::lessEqual(key, this->keys[i])) {
+            if (KeyComparator<KeyType>::equal(key, this->keys[i])) {
+                // Si la clave es igual, ir al hijo derecho
+                i++;
+                break;
+            }
+            i++;
+        }
+
+        return getChild(i);
     }
 
-    // ============================================================================
-    // INSERCIÓN DE CLAVES CON MANEJO DE HIJOS
-    // ============================================================================
-    
     /**
-     * @brief Inserta una clave de separación y reorganiza hijos
+     * @brief Encuentra el índice del hijo que contiene una clave
      */
-    bool insertSeparatorKey(const KeyType& key, BPlusNode<KeyType>* left_child, 
-                            BPlusNode<KeyType>* right_child) {
-        
-        if (this->isFull()) {
-            return false; // Necesita split primero
+    int findChildIndex(std::shared_ptr<BPlusNode<KeyType>> child) const {
+        for (size_t i = 0; i < children.size(); i++) {
+            if (children[i] == child) {
+                return static_cast<int>(i);
+            }
         }
-        
-        // Encontrar posición donde insertar la clave
-        int pos = this->findInsertPosition(key);
-        
-        // Insertar la clave
-        this->keys.insert(this->keys.begin() + pos, key);
-        
-        // El hijo izquierdo ya debe estar en la posición correcta
-        // Insertar el hijo derecho en pos + 1
-        if (pos + 1 <= static_cast<int>(children.size())) {
-            children.insert(children.begin() + pos + 1, right_child);
-            right_child->setParent(this);
-        }
-        
-        return true;
+        return -1;
     }
-    
+
     /**
-     * @brief Actualiza una clave de separación
+     * @brief Elimina un hijo
      */
-    bool updateSeparatorKey(const KeyType& old_key, const KeyType& new_key) {
-        int index = this->findKey(old_key);
-        if (index != -1) {
-            this->keys[index] = new_key;
+    bool removeChild(std::shared_ptr<BPlusNode<KeyType>> child) {
+        auto it = std::find(children.begin(), children.end(), child);
+        if (it != children.end()) {
+            children.erase(it);
             return true;
         }
         return false;
     }
 
-    // ============================================================================
-    // NAVEGACIÓN Y BÚSQUEDA
-    // ============================================================================
-    
     /**
-     * @brief Encuentra el hijo más a la izquierda (para encontrar el mínimo)
+     * @brief Número de hijos
      */
-    BPlusNode<KeyType>* getLeftmostChild() const {
-        if (!children.empty()) {
-            return children.front();
-        }
-        return nullptr;
+    size_t getChildCount() const {
+        return children.size();
     }
-    
+
     /**
-     * @brief Encuentra el hijo más a la derecha (para encontrar el máximo)
+     * @brief Obtiene todos los hijos
      */
-    BPlusNode<KeyType>* getRightmostChild() const {
-        if (!children.empty()) {
-            return children.back();
-        }
-        return nullptr;
-    }
-    
-    /**
-     * @brief Obtiene el rango de claves que maneja este nodo
-     */
-    std::pair<KeyType, KeyType> getKeyRange() const {
-        if (this->keys.empty()) {
-            throw std::runtime_error("Nodo interno sin claves");
-        }
-        
-        return std::make_pair(this->keys.front(), this->keys.back());
+    const std::vector<std::shared_ptr<BPlusNode<KeyType>>>& getChildren() const {
+        return children;
     }
 
     // ============================================================================
-    // VALIDACIÓN ESPECÍFICA DE NODOS INTERNOS
+    // OPERACIONES DE RANGO
     // ============================================================================
-    
+
     /**
-     * @brief Valida la integridad del nodo interno
+     * @brief Búsqueda por rango (redirige a hojas)
      */
-    bool validateNode() const override {
-        // Validación de la clase base
-        if (!BPlusNode<KeyType>::validateNode()) {
-            return false;
-        }
-        
-        // Verificar que tenga un hijo más que claves
-        if (children.size() != this->keys.size() + 1) {
-            std::cout << "❌ Error: Número de hijos (" << children.size() 
-                      << ") debe ser claves + 1 (" << this->keys.size() + 1 << ")" << std::endl;
-            return false;
-        }
-        
-        // Verificar que todos los hijos tengan este nodo como padre
-        for (const auto* child : children) {
-            if (child && child->getParent() != this) {
-                std::cout << "❌ Error: Hijo no tiene este nodo como padre" << std::endl;
-                return false;
+    void rangeSearch(const KeyType& start_key, const KeyType& end_key,
+                     std::vector<RecordReference>& results, int& found_count) override {
+        found_count = 0;
+
+        // Encontrar el hijo que podría contener start_key
+        auto start_child = findChildForKey(start_key);
+        if (!start_child) return;
+
+        // Realizar búsqueda por rango en el subárbol
+        start_child->rangeSearch(start_key, end_key, results, found_count);
+
+        // Si abarca múltiples hijos, continuar con los siguientes
+        // (Esta lógica se puede optimizar más)
+        for (size_t i = 0; i < children.size(); i++) {
+            if (children[i] == start_child) {
+                // Continuar con hijos siguientes si es necesario
+                for (size_t j = i + 1; j < children.size(); j++) {
+                    // Verificar si este hijo podría contener claves en el rango
+                    if (j > 0 && KeyComparator<KeyType>::greater(this->keys[j-1], end_key)) {
+                        break; // No más hijos relevantes
+                    }
+                    
+                    int additional_found = 0;
+                    children[j]->rangeSearch(start_key, end_key, results, additional_found);
+                    found_count += additional_found;
+                }
+                break;
             }
         }
-        
-        // Verificar que no haya hijos nulos
-        for (const auto* child : children) {
-            if (!child) {
-                std::cout << "❌ Error: Hijo nulo encontrado" << std::endl;
-                return false;
-            }
+    }
+
+    // ============================================================================
+    // INSERCIÓN DE CLAVES EN NODO INTERNO
+    // ============================================================================
+
+    /**
+     * @brief Inserta una clave separadora en el nodo interno
+     */
+    bool insertSeparatorKey(const KeyType& key, std::shared_ptr<BPlusNode<KeyType>> left_child,
+                           std::shared_ptr<BPlusNode<KeyType>> right_child) {
+        if (this->isFull()) {
+            return false; // Necesita split primero
         }
-        
+
+        // Encontrar posición de inserción
+        int pos = this->findInsertPosition(key);
+
+        // Insertar clave
+        this->keys.insert(this->keys.begin() + pos, key);
+
+        // Actualizar hijos
+        if (pos < static_cast<int>(children.size())) {
+            children[pos] = left_child;
+            children.insert(children.begin() + pos + 1, right_child);
+        } else {
+            children.push_back(right_child);
+        }
+
+        // Establecer padres
+        left_child->setParent(this);
+        right_child->setParent(this);
+
         return true;
     }
-    
+
+    // ============================================================================
+    // SERIALIZACIÓN
+    // ============================================================================
+
     /**
-     * @brief Valida la estructura del subárbol
+     * @brief Serializa el nodo interno
      */
-    bool validateSubtree() const {
-        if (!validateNode()) {
-            return false;
+    std::string serialize() const {
+        std::ostringstream oss;
+        
+        oss << "INTERNAL_NODE|" << this->order << "|" << this->keys.size() << std::endl;
+        
+        // Serializar claves
+        for (const auto& key : this->keys) {
+            oss << "KEY|" << key << std::endl;
         }
         
-        // Validar recursivamente todos los hijos
-        for (const auto* child : children) {
-            if (child) {
-                if (!child->validateNode()) {
-                    return false;
-                }
-                
-                // Si el hijo es interno, validar su subárbol también
-                if (!child->isLeaf()) {
-                    const auto* internal_child = static_cast<const InternalNode<KeyType>*>(child);
-                    if (!internal_child->validateSubtree()) {
-                        return false;
-                    }
-                }
+        // Serializar hijos (recursivamente)
+        for (const auto& child : children) {
+            oss << "CHILD_START" << std::endl;
+            oss << child->serialize();
+            oss << "CHILD_END" << std::endl;
+        }
+        
+        return oss.str();
+    }
+
+    /**
+     * @brief Deserializa el nodo interno
+     */
+    bool deserialize(const std::string& data) {
+        // Implementación básica - puede expandirse según necesidades
+        std::istringstream iss(data);
+        std::string line;
+        
+        this->keys.clear();
+        children.clear();
+        
+        while (std::getline(iss, line)) {
+            if (line.empty()) continue;
+            
+            if (line.find("KEY|") == 0) {
+                KeyType key;
+                std::istringstream key_stream(line.substr(4));
+                key_stream >> key;
+                this->keys.push_back(key);
             }
+            // Deserialización de hijos sería más compleja
+            // Se implementaría según necesidades específicas
         }
         
         return true;
@@ -353,168 +341,116 @@ public:
     // ============================================================================
     // VISUALIZACIÓN Y DEBUG
     // ============================================================================
-    
+
     /**
-     * @brief Muestra información detallada del nodo interno
+     * @brief Muestra el nodo interno
      */
-    void displayInfo() const override {
-        std::cout << "🌳 NODO INTERNO:" << std::endl;
-        std::cout << "  Orden: " << this->order << std::endl;
-        std::cout << "  Claves: " << this->keys.size() << "/" << this->getMaxKeys() << std::endl;
-        std::cout << "  Hijos: " << children.size() << "/" << this->order << std::endl;
-        std::cout << "  Ocupación: " << std::fixed << std::setprecision(1) 
-                  << this->getOccupancyFactor() * 100 << "%" << std::endl;
+    void display(int level = 0) const override {
+        std::string indent(level * 2, ' ');
         
-        // Mostrar claves de separación
-        if (!this->keys.empty()) {
-            std::cout << "  Claves de separación: ";
-            for (size_t i = 0; i < this->keys.size(); i++) {
-                std::cout << this->keys[i];
-                if (i < this->keys.size() - 1) std::cout << ", ";
-            }
-            std::cout << std::endl;
-        }
-        
-        // Información de hijos
-        std::cout << "  Hijos (" << children.size() << "):" << std::endl;
-        for (size_t i = 0; i < children.size() && i < 3; i++) {
-            std::cout << "    [" << i << "] " << (children[i]->isLeaf() ? "HOJA" : "INTERNO") 
-                      << " con " << children[i]->getKeys().size() << " claves" << std::endl;
-        }
-        
-        if (children.size() > 3) {
-            std::cout << "    ... (" << (children.size() - 3) << " hijos más)" << std::endl;
-        }
-        
-        // Estado
-        std::cout << "  Estado: " << (this->isFull() ? "LLENO" : 
-                                    (this->isEmpty() ? "VACÍO" : "PARCIAL")) << std::endl;
-    }
-    
-    /**
-     * @brief Representación en string del nodo interno
-     */
-    std::string toString() const override {
-        std::stringstream ss;
-        ss << "INTERNAL[";
+        std::cout << indent << "InternalNode (Level " << level << "): [";
         for (size_t i = 0; i < this->keys.size(); i++) {
-            ss << this->keys[i];
-            if (i < this->keys.size() - 1) ss << ",";
+            std::cout << this->keys[i];
+            if (i < this->keys.size() - 1) std::cout << ", ";
         }
-        ss << "](" << children.size() << " hijos)";
-        return ss.str();
-    }
-    
-    /**
-     * @brief Muestra la estructura del subárbol
-     */
-    void displaySubtree(int depth = 0) const {
-        std::string indent(depth * 2, ' ');
-        std::cout << indent << toString() << std::endl;
-        
-        // Mostrar hijos recursivamente
-        for (const auto* child : children) {
-            if (child) {
-                if (child->isLeaf()) {
-                    std::cout << indent << "  " << child->toString() << std::endl;
-                } else {
-                    const auto* internal_child = static_cast<const InternalNode<KeyType>*>(child);
-                    internal_child->displaySubtree(depth + 1);
-                }
+        std::cout << "] (" << children.size() << " children)" << std::endl;
+
+        // Mostrar hijos
+        for (size_t i = 0; i < children.size(); i++) {
+            std::cout << indent << "Child[" << i << "]:" << std::endl;
+            if (children[i]) {
+                children[i]->display(level + 1);
+            } else {
+                std::cout << indent << "  (null)" << std::endl;
             }
         }
     }
 
-    // ============================================================================
-    // ESTADÍSTICAS ESPECÍFICAS DE NODOS INTERNOS
-    // ============================================================================
-    
     /**
-     * @brief Obtiene estadísticas del nodo interno
+     * @brief Información detallada del nodo interno
      */
-    struct InternalStats {
-        size_t key_count;
-        size_t child_count;
-        size_t leaf_children;
-        size_t internal_children;
-        int subtree_height;
-        double occupancy;
-        bool all_children_valid;
-    };
-    
-    InternalStats getInternalStats() const {
-        InternalStats stats;
-        stats.key_count = this->keys.size();
-        stats.child_count = children.size();
-        stats.leaf_children = 0;
-        stats.internal_children = 0;
-        stats.subtree_height = 1;
-        stats.occupancy = this->getOccupancyFactor();
-        stats.all_children_valid = true;
+    void displayDetailed() const {
+        std::cout << "\n🌳 NODO INTERNO DETALLADO:" << std::endl;
+        this->displayBasicInfo();
+        std::cout << "  Número de hijos: " << children.size() << std::endl;
         
-        int max_child_height = 0;
+        // Verificar consistencia
+        bool consistent = (children.size() == this->keys.size() + 1);
+        std::cout << "  Consistencia hijos/claves: " << (consistent ? "✓" : "✗") << std::endl;
+
+        if (!this->keys.empty()) {
+            std::cout << "  Rango de claves: [" << this->keys.front() 
+                      << " ... " << this->keys.back() << "]" << std::endl;
+        }
+    }
+
+    /**
+     * @brief Validación de consistencia del nodo interno
+     */
+    bool validateConsistency() const {
+        // Verificar que número de hijos = número de claves + 1
+        if (children.size() != this->keys.size() + 1) {
+            std::cout << "❌ Inconsistencia: " << children.size() << " hijos, " 
+                      << this->keys.size() << " claves" << std::endl;
+            return false;
+        }
+
+        // Verificar que las claves están ordenadas
+        for (size_t i = 1; i < this->keys.size(); i++) {
+            if (KeyComparator<KeyType>::greater(this->keys[i-1], this->keys[i])) {
+                std::cout << "❌ Claves desordenadas: " << this->keys[i-1] 
+                          << " > " << this->keys[i] << std::endl;
+                return false;
+            }
+        }
+
+        // Verificar que todos los hijos tienen este nodo como padre
+        for (const auto& child : children) {
+            if (child && child->getParent() != this) {
+                std::cout << "❌ Hijo con padre incorrecto" << std::endl;
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Encuentra la hoja más a la izquierda en el subárbol
+     */
+    std::shared_ptr<BPlusNode<KeyType>> getLeftmostLeaf() const {
+        if (children.empty()) return nullptr;
         
-        for (const auto* child : children) {
-            if (child) {
-                if (child->isLeaf()) {
-                    stats.leaf_children++;
-                } else {
-                    stats.internal_children++;
-                    const auto* internal_child = static_cast<const InternalNode<KeyType>*>(child);
-                    int child_height = internal_child->getInternalStats().subtree_height;
-                    max_child_height = std::max(max_child_height, child_height);
-                }
+        auto current = children[0];
+        while (current && !current->isLeaf()) {
+            auto internal = std::dynamic_pointer_cast<InternalNode<KeyType>>(current);
+            if (internal && !internal->children.empty()) {
+                current = internal->children[0];
             } else {
-                stats.all_children_valid = false;
+                break;
             }
         }
         
-        stats.subtree_height = 1 + max_child_height;
-        
-        return stats;
+        return current;
     }
-    
+
     /**
-     * @brief Cuenta el número total de nodos en el subárbol
+     * @brief Encuentra la hoja más a la derecha en el subárbol
      */
-    size_t countNodesInSubtree() const {
-        size_t count = 1; // Este nodo
+    std::shared_ptr<BPlusNode<KeyType>> getRightmostLeaf() const {
+        if (children.empty()) return nullptr;
         
-        for (const auto* child : children) {
-            if (child) {
-                if (child->isLeaf()) {
-                    count += 1;
-                } else {
-                    const auto* internal_child = static_cast<const InternalNode<KeyType>*>(child);
-                    count += internal_child->countNodesInSubtree();
-                }
+        auto current = children.back();
+        while (current && !current->isLeaf()) {
+            auto internal = std::dynamic_pointer_cast<InternalNode<KeyType>>(current);
+            if (internal && !internal->children.empty()) {
+                current = internal->children.back();
+            } else {
+                break;
             }
         }
         
-        return count;
-    }
-    
-    /**
-     * @brief Calcula la altura del subárbol
-     */
-    int getSubtreeHeight() const {
-        if (children.empty()) {
-            return 1;
-        }
-        
-        int max_height = 0;
-        for (const auto* child : children) {
-            if (child) {
-                int child_height = 1;
-                if (!child->isLeaf()) {
-                    const auto* internal_child = static_cast<const InternalNode<KeyType>*>(child);
-                    child_height = internal_child->getSubtreeHeight();
-                }
-                max_height = std::max(max_height, child_height);
-            }
-        }
-        
-        return 1 + max_height;
+        return current;
     }
 };
 
