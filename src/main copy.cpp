@@ -205,7 +205,7 @@ public:
 
         std::cout << "\n📡 CARGANDO DATASET GPS..." << std::endl;
         
-        std::string csv_path = "./data/Data-GPS.csv";
+        std::string csv_path = "./data/data-GPS.csv";
         if (!std::filesystem::exists(csv_path)) {
             std::cout << "❌ Archivo no encontrado: " << csv_path << std::endl;
             return false;
@@ -784,8 +784,7 @@ int main() {
     try {
         #ifdef _WIN32
         SetConsoleOutputCP(CP_UTF8);
-        SetConsoleCP(CP_UTF8); 
-        //std::locale::global(std::locale(""));
+        std::locale::global(std::locale(""));
         #endif
 
         std::cout << "🔥 SGBD FÍSICO EDUCATIVO - ÍNDICES ESPECIALIZADOS" << std::endl;

@@ -39,18 +39,13 @@ protected:
     double total_access_time;
 
 public:
-
-      // Método para que BufferPool acceda al FileSystem
-
+    // Método para que BufferPool acceda al FileSystem
     FileSystemSimulator* getFileSystemPtr() { return &filesystem; }
     const std::string& getBasePath() const { return filesystem.getBasePath(); }
-     
-    
-    bool writeBlock(const PhysicalAddress& addr, const Block& block);
-    bool readBlock(const PhysicalAddress& addr, Block& block);
-   
-     // @brief Constructor
-    
+
+    /**
+     * @brief Constructor
+     */
     DiskManager(const std::string& disk_path = "./disk_simulation") 
         : filesystem(disk_path)
         , next_free_address(0, 0, 0, 0)
@@ -59,6 +54,74 @@ public:
         , total_writes(0)
         , total_access_time(0.0)
     {
+    }
+
+    /**
+     * @brief ✅ IMPLEMENTACIÓN CORREGIDA - Escribe un bloque al disco
+     */
+    virtual bool writeBlock(const PhysicalAddress& addr, const Block& block) {
+        try {
+            // Simular tiempo de acceso
+            double access_time = simulateAccessTime(addr);
+            total_access_time += access_time;
+            total_writes++;
+
+            // Escribir usando FileSystemSimulator
+            if (filesystem.writeBlock(addr, block)) {
+                // Actualizar cache
+                auto cached_block = std::make_shared<Block>(block);
+                block_cache[addr] = cached_block;
+                
+                std::cout << "💾 Bloque escrito: " << addr.toString() 
+                          << " (" << access_time << " ms)" << std::endl;
+                return true;
+            } else {
+                std::cout << "❌ Error escribiendo bloque: " << addr.toString() << std::endl;
+                return false;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "❌ Excepción escribiendo bloque " << addr.toString() 
+                      << ": " << e.what() << std::endl;
+            return false;
+        }
+    }
+
+    /**
+     * @brief ✅ IMPLEMENTACIÓN CORREGIDA - Lee un bloque del disco
+     */
+    virtual bool readBlock(const PhysicalAddress& addr, Block& block) {
+        try {
+            // Verificar cache primero
+            auto cache_it = block_cache.find(addr);
+            if (cache_it != block_cache.end()) {
+                block = *(cache_it->second);
+                std::cout << "📋 Bloque leído desde cache: " << addr.toString() << std::endl;
+                return true;
+            }
+
+            // Simular tiempo de acceso
+            double access_time = simulateAccessTime(addr);
+            total_access_time += access_time;
+            total_reads++;
+
+            // Leer usando FileSystemSimulator
+            if (filesystem.readBlock(addr, block)) {
+                // Agregar al cache
+                auto cached_block = std::make_shared<Block>(block);
+                block_cache[addr] = cached_block;
+                
+                std::cout << "📖 Bloque leído desde disco: " << addr.toString() 
+                          << " (" << access_time << " ms)" << std::endl;
+                return true;
+            } else {
+                std::cout << "❌ Error leyendo bloque: " << addr.toString() << std::endl;
+                return false;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "❌ Excepción leyendo bloque " << addr.toString() 
+                      << ": " << e.what() << std::endl;
+            return false;
+        }
     }
 
     /**
@@ -117,7 +180,7 @@ public:
         relation_blocks[table_name].push_back(addr);
         
         // Escribir bloque vacío al disco
-        filesystem.writeBlock(addr, *block);
+        writeBlock(addr, *block);
         
         std::cout << "Tabla '" << table_name << "' creada exitosamente." << std::endl;
         return true;
@@ -172,7 +235,7 @@ public:
             total_writes++;
             
             // Escribir bloque al disco
-            filesystem.writeBlock(block->getAddress(), *block);
+            writeBlock(block->getAddress(), *block);
             
             std::cout << "Registro insertado en tabla '" << table_name 
                       << "' (ID: " << record->getId() << ", Tiempo: " 
@@ -266,7 +329,7 @@ public:
                 total_writes++;
                 
                 // Escribir bloque modificado
-                filesystem.writeBlock(addr, *block);
+                writeBlock(addr, *block);
                 
                 std::cout << "Registro " << record_id << " eliminado lógicamente." << std::endl;
                 return true;
@@ -295,7 +358,7 @@ public:
                 size_t new_count = block->getRecordCount();
                 
                 if (old_count != new_count) {
-                    filesystem.writeBlock(addr, *block);
+                    writeBlock(addr, *block);
                     compacted_blocks++;
                 }
             }
@@ -375,6 +438,28 @@ public:
         filesystem.displayDirectoryStructure();
     }
 
+    /**
+     * @brief ✅ GETTER AGREGADO - Para acceso a relation_blocks desde clases derivadas
+     */
+    const std::map<std::string, std::vector<PhysicalAddress>>& getRelationBlocks() const {
+        return relation_blocks;
+    }
+
+    /**
+     * @brief ✅ GETTER AGREGADO - Para acceso a config desde clases derivadas
+     */
+    const DiskConfig& getConfig() const {
+        return config;
+    }
+
+protected:
+    /**
+     * @brief ✅ MÉTODO PROTEGIDO - Para que clases derivadas puedan acceder
+     */
+    std::map<std::string, std::vector<PhysicalAddress>>& getRelationBlocksRef() {
+        return relation_blocks;
+    }
+
 private:
     /**
      * @brief Asigna una nueva dirección de bloque
@@ -433,7 +518,7 @@ private:
         
         // Cargar desde disco
         auto block = std::make_shared<Block>(addr, config.getBytesPerSector());
-        if (filesystem.readBlock(addr, *block)) {
+        if (readBlock(addr, *block)) {
             block_cache[addr] = block;
             return block;
         }
@@ -575,7 +660,7 @@ private:
         
         for (const auto& addr : occupied) {
             auto block = std::make_shared<Block>(addr, config.getBytesPerSector());
-            if (filesystem.readBlock(addr, *block)) {
+            if (readBlock(addr, *block)) {
                 block_cache[addr] = block;
                 
                 std::string table_name = block->getRelationName();
