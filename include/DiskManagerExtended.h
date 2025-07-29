@@ -9,14 +9,14 @@
 #include <memory>
 
 /**
- * @brief DiskManagerExtended - COMPLETAMENTE CORREGIDO para integración con IndexManager
+ * @brief DiskManagerExtended - COMPLETAMENTE CORREGIDO con sincronización automática
  * 
  * ✅ CORRECCIONES FINALES APLICADAS:
- * - Eliminados override incorrectos
+ * - Sincronización automática de PageDirectory en CADA inserción
  * - Métodos compatibles con DiskManager base
  * - API correcta para insertRecord con vector<string>
- * - Sin métodos que no existen en clase base
- * - Sincronización correcta con relation_blocks del DiskManager base
+ * - Verificaciones robustas de integridad
+ * - Diagnósticos completos integrados
  */
 class DiskManagerExtended : public DiskManager {
 private:
@@ -37,6 +37,7 @@ public:
         std::cout << "   📁 Ruta base: " << base_path << std::endl;
         std::cout << "   📋 Page Directory: ✓" << std::endl;
         std::cout << "   🔗 IndexManager integration: ✓" << std::endl;
+        std::cout << "   🔄 Sincronización automática: ✓" << std::endl;
     }
 
     /**
@@ -45,6 +46,7 @@ public:
     ~DiskManagerExtended() {
         if (page_directory) {
             page_directory->saveToDisk();
+            std::cout << "💾 PageDirectory guardado al finalizar" << std::endl;
         }
     }
 
@@ -58,7 +60,7 @@ public:
     bool getTablePages(const std::string& table_name, std::vector<PhysicalAddress>& pages) {
         std::cout << "🔍 Obteniendo páginas de tabla: " << table_name << std::endl;
         
-        // ✅ CORRECCIÓN: Usar getRelationBlocks() del DiskManager base
+        // ✅ Usar getRelationBlocks() del DiskManager base
         const auto& relation_blocks = getRelationBlocks();
         auto it = relation_blocks.find(table_name);
         
@@ -70,8 +72,8 @@ public:
         pages = it->second;
         std::cout << "✅ Encontradas " << pages.size() << " páginas para tabla " << table_name << std::endl;
         
-        // Asegurar que todas las páginas estén en Page Directory
-        registerTablePagesInDirectory(table_name);
+        // ✅ Verificar y sincronizar automáticamente si es necesario
+        ensureAllPagesRegistered(table_name);
         
         return !pages.empty();
     }
@@ -85,6 +87,10 @@ public:
         
         // Obtener page_id para la dirección física
         int page_id = getPageIdForAddress(addr);
+        if (page_id == -1) {
+            // Si no existe, registrarlo
+            page_id = registerBlockAsPage(addr, getConfig().getBytesPerSector());
+        }
         
         // Crear y retornar RecordReference
         return RecordReference(addr, slot_id, page_id);
@@ -98,7 +104,7 @@ public:
             return false;
         }
         
-        // ✅ CORRECCIÓN: Usar método público readBlock de DiskManager base
+        // ✅ Usar método público readBlock de DiskManager base
         return readBlock(record_ref.getPhysicalAddress(), block);
     }
 
@@ -124,9 +130,25 @@ public:
     /**
      * @brief ✅ Registra un bloque como página en el Page Directory
      */
-    bool registerBlockAsPage(const PhysicalAddress& addr, size_t page_size) {
-        int page_id = page_directory->allocateNewPageId();
-        return page_directory->registerPage(page_id, addr, page_size);
+    int registerBlockAsPage(const PhysicalAddress& addr, size_t page_size) {
+        // Verificar si ya está registrado
+        int existing_page_id = getPageIdForAddress(addr);
+        if (existing_page_id != -1) {
+            return existing_page_id;
+        }
+        
+        // Crear nueva entrada
+        int new_page_id = page_directory->allocateNewPageId();
+        bool success = page_directory->registerPage(new_page_id, addr, page_size);
+        
+        if (success) {
+            std::cout << "📄 Nueva página registrada: " << addr.toString() 
+                      << " → PageID " << new_page_id << std::endl;
+            return new_page_id;
+        } else {
+            std::cout << "❌ Error registrando página: " << addr.toString() << std::endl;
+            return -1;
+        }
     }
 
     /**
@@ -179,64 +201,137 @@ public:
     }
 
     // ============================================================================
-    // ✅ MÉTODOS COMPATIBLES CON DISKMANAGER BASE
+    // ✅ MÉTODOS CRÍTICOS CON SINCRONIZACIÓN AUTOMÁTICA
     // ============================================================================
 
     /**
-     * @brief ✅ Inserta registro usando vector<string> (compatible con DiskManager base)
+     * @brief ✅ MÉTODO CRÍTICO - Inserta registro Y sincroniza PageDirectory automáticamente
      */
     bool insertRecordFromValues(const std::string& table_name, const std::vector<std::string>& values) {
-        // Recordar cuántos bloques tenía la tabla antes
+        // 1. Recordar estado ANTES de inserción
         size_t blocks_before = getTableBlockCount(table_name);
         
-        // ✅ CORRECCIÓN: Usar método insertRecord del DiskManager base
-        if (!insertRecord(table_name, values)) {
+        // 2. ✅ INSERTAR usando método base (DiskManager::insertRecord)
+        if (!DiskManager::insertRecord(table_name, values)) {
             return false;
         }
         
-        // Registrar nuevos bloques en Page Directory si los hubo
+        // 3. ✅ SINCRONIZACIÓN AUTOMÁTICA POST-INSERCIÓN
         size_t blocks_after = getTableBlockCount(table_name);
+        
         if (blocks_after > blocks_before) {
-            registerNewTableBlocks(table_name, blocks_before);
+            // Nuevos bloques detectados - registrar automáticamente
+            syncNewTableBlocks(table_name, blocks_before);
         }
         
         return true;
     }
 
     /**
-     * @brief ✅ Información del sistema SIN override
+     * @brief ✅ SINCRONIZACIÓN FORZADA COMPLETA
      */
-    void displayExtendedSystemInfo() const {
-        std::cout << "\n📋 DISK MANAGER EXTENDED INFO:" << std::endl;
-        std::cout << "===============================" << std::endl;
+    void forcePageDirectorySync() {
+        std::cout << "\n🔄 SINCRONIZACIÓN FORZADA DE PAGEDIRECTORY..." << std::endl;
         
-        // Mostrar estadísticas base
-        std::cout << "📊 ESTADÍSTICAS BASE:" << std::endl;
-        const_cast<DiskManagerExtended*>(this)->displayStatistics();
+        int pages_before = page_directory->getPageCount();
+        int pages_registered = 0;
         
-        std::cout << "\n📋 PAGE DIRECTORY:" << std::endl;
-        page_directory->displayInfo();
-        
-        std::cout << "\n📊 RELACIONES Y BLOQUES:" << std::endl;
         const auto& relation_blocks = getRelationBlocks();
         for (const auto& relation : relation_blocks) {
-            std::cout << "   📋 " << relation.first << ": " << relation.second.size() << " bloques" << std::endl;
+            std::cout << "   📋 Sincronizando tabla: " << relation.first 
+                      << " (" << relation.second.size() << " bloques)" << std::endl;
             
-            // Mostrar algunas direcciones como muestra
-            size_t sample_size = std::min(static_cast<size_t>(3), relation.second.size());
-            for (size_t i = 0; i < sample_size; i++) {
-                std::cout << "      • " << relation.second[i].toString() << std::endl;
-            }
-            if (relation.second.size() > sample_size) {
-                std::cout << "      • ... y " << (relation.second.size() - sample_size) << " más" << std::endl;
+            for (const auto& addr : relation.second) {
+                int page_id = registerBlockAsPage(addr, getConfig().getBytesPerSector());
+                if (page_id != -1) {
+                    pages_registered++;
+                }
             }
         }
         
+        int pages_after = page_directory->getPageCount();
+        
+        std::cout << "\n✅ SINCRONIZACIÓN COMPLETADA:" << std::endl;
+        std::cout << "   📄 Páginas antes: " << pages_before << std::endl;
+        std::cout << "   📄 Páginas después: " << pages_after << std::endl;
+        std::cout << "   📄 Páginas registradas: " << pages_registered << std::endl;
+        
+        // Guardar cambios inmediatamente
+        if (page_directory->isDirty()) {
+            page_directory->saveToDisk();
+            std::cout << "   💾 PageDirectory guardado en disco" << std::endl;
+        }
+    }
+
+    /**
+     * @brief ✅ DIAGNÓSTICO COMPLETO DEL SISTEMA
+     */
+    void displayExtendedSystemInfo() const {
+        std::cout << "\n📋 DISK MANAGER EXTENDED - DIAGNÓSTICO COMPLETO:" << std::endl;
+        std::cout << "=================================================" << std::endl;
+        
+        // Estadísticas base del DiskManager
+        std::cout << "📊 ESTADÍSTICAS BASE:" << std::endl;
+        const_cast<DiskManagerExtended*>(this)->DiskManager::displayStatistics();
+        
+        // Estado del PageDirectory
+        std::cout << "\n📄 PAGE DIRECTORY STATUS:" << std::endl;
+        if (page_directory) {
+            std::cout << "   Páginas registradas: " << page_directory->getPageCount() << std::endl;
+            std::cout << "   Próximo Page ID: " << page_directory->getNextPageId() << std::endl;
+            std::cout << "   Estado: " << (page_directory->isDirty() ? "Modificado" : "Sincronizado") << std::endl;
+            std::cout << "   Archivo: " << page_directory->getDirectoryFile() << std::endl;
+        } else {
+            std::cout << "   ❌ PageDirectory no inicializado" << std::endl;
+        }
+        
+        // Análisis de sincronización detallado
+        const auto& relation_blocks = getRelationBlocks();
+        int total_blocks = 0;
+        
+        std::cout << "\n📊 ANÁLISIS DE SINCRONIZACIÓN:" << std::endl;
+        for (const auto& relation : relation_blocks) {
+            int blocks_in_relation = relation.second.size();
+            total_blocks += blocks_in_relation;
+            
+            std::cout << "   📋 " << relation.first << ":" << std::endl;
+            std::cout << "      Bloques físicos: " << blocks_in_relation << std::endl;
+            
+            // Contar páginas registradas para esta tabla
+            int registered_pages = 0;
+            for (const auto& addr : relation.second) {
+                if (const_cast<DiskManagerExtended*>(this)->getPageIdForAddress(addr) != -1) {
+                    registered_pages++;
+                }
+            }
+            
+            std::cout << "      Páginas en directorio: " << registered_pages << std::endl;
+            
+            if (registered_pages != blocks_in_relation) {
+                std::cout << "      ⚠️ DESINCRONIZACIÓN: " 
+                          << (blocks_in_relation - registered_pages) 
+                          << " bloques no registrados" << std::endl;
+            } else {
+                std::cout << "      ✅ Perfectamente sincronizado" << std::endl;
+            }
+        }
+        
+        std::cout << "\n📈 RESUMEN GLOBAL:" << std::endl;
+        std::cout << "   Total bloques físicos: " << total_blocks << std::endl;
+        std::cout << "   Total páginas registradas: " << (page_directory ? page_directory->getPageCount() : 0) << std::endl;
+        
+        if (page_directory && page_directory->getPageCount() != total_blocks) {
+            std::cout << "   ❌ DESINCRONIZACIÓN GLOBAL detectada" << std::endl;
+            std::cout << "   💡 Usar opción 53 para sincronizar automáticamente" << std::endl;
+        } else {
+            std::cout << "   ✅ Sistema completamente sincronizado" << std::endl;
+        }
+        
         std::cout << "\n🔗 INTEGRACIÓN INDEXMANAGER:" << std::endl;
-        std::cout << "   ✅ getTablePages() disponible" << std::endl;
-        std::cout << "   ✅ createRecordReference() disponible" << std::endl;
-        std::cout << "   ✅ resolveRecordReference() disponible" << std::endl;
-        std::cout << "   📈 Page Directory: " << page_directory->getPageCount() << " páginas" << std::endl;
+        std::cout << "   ✅ getTablePages() → " << total_blocks << " páginas disponibles" << std::endl;
+        std::cout << "   ✅ createRecordReference() → funcional" << std::endl;
+        std::cout << "   ✅ resolveRecordReference() → funcional" << std::endl;
+        std::cout << "   ✅ Sincronización automática → activa" << std::endl;
     }
 
     // ============================================================================
@@ -253,37 +348,58 @@ public:
 
 private:
     // ============================================================================
-    // MÉTODOS AUXILIARES PRIVADOS
+    // MÉTODOS AUXILIARES PRIVADOS PARA SINCRONIZACIÓN
     // ============================================================================
 
     /**
-     * @brief Registra páginas de una tabla en Page Directory
+     * @brief Sincroniza nuevos bloques de tabla en PageDirectory
      */
-    void registerTablePagesInDirectory(const std::string& table_name) {
+    void syncNewTableBlocks(const std::string& table_name, size_t start_index) {
+        std::cout << "🔧 Sincronizando nuevos bloques para " << table_name << "..." << std::endl;
+        
         const auto& relation_blocks = getRelationBlocks();
         auto it = relation_blocks.find(table_name);
         
         if (it != relation_blocks.end()) {
-            for (const auto& addr : it->second) {
-                int existing_page_id = getPageIdForAddress(addr);
-                if (existing_page_id == -1) {
-                    registerBlockAsPage(addr, getConfig().getBytesPerSector());
+            int synced = 0;
+            for (size_t i = start_index; i < it->second.size(); ++i) {
+                const auto& addr = it->second[i];
+                int page_id = registerBlockAsPage(addr, getConfig().getBytesPerSector());
+                if (page_id != -1) {
+                    synced++;
+                }
+            }
+            
+            if (synced > 0) {
+                std::cout << "✅ " << synced << " nuevos bloques sincronizados automáticamente" << std::endl;
+                
+                // Guardar cambios inmediatamente
+                if (page_directory->isDirty()) {
+                    page_directory->saveToDisk();
                 }
             }
         }
     }
 
     /**
-     * @brief Registra nuevos bloques de tabla en Page Directory
+     * @brief Asegura que todas las páginas de una tabla estén registradas
      */
-    void registerNewTableBlocks(const std::string& table_name, size_t start_index) {
+    void ensureAllPagesRegistered(const std::string& table_name) {
         const auto& relation_blocks = getRelationBlocks();
         auto it = relation_blocks.find(table_name);
         
         if (it != relation_blocks.end()) {
-            for (size_t i = start_index; i < it->second.size(); ++i) {
-                const auto& addr = it->second[i];
-                registerBlockAsPage(addr, getConfig().getBytesPerSector());
+            int registered = 0;
+            for (const auto& addr : it->second) {
+                if (getPageIdForAddress(addr) == -1) {
+                    if (registerBlockAsPage(addr, getConfig().getBytesPerSector()) != -1) {
+                        registered++;
+                    }
+                }
+            }
+            
+            if (registered > 0) {
+                std::cout << "🔧 " << registered << " páginas registradas automáticamente para " << table_name << std::endl;
             }
         }
     }
