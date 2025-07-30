@@ -324,13 +324,17 @@ public:
 
         try {
             if (current_server == "Server_A") {
-                std::cout << "\n🔗 Construyendo Hash Extensible (IMEI)..." << std::endl;
-                imei_index = index_manager->buildHashIndexFromDisk(gps_table_name, "imei", 1500);
+                std::cout << "\n🔗 Construyendo Hash Extensible MÚLTIPLE (IMEI)..." << std::endl;
+                std::cout << "🎯 Modo GPS: Múltiples registros por IMEI (O(1) para consultas completas)" << std::endl;
+                
+                // ✅ USAR MÉTODO MÚLTIPLE ESPECÍFICO PARA GPS
+                imei_index = index_manager->buildHashIndexMultipleFromDisk(gps_table_name, "imei", -1);
                 
                 if (imei_index && imei_index->getTotalRecords() > 0) {
-                    std::cout << "✅ Hash Extensible construido: " << imei_index->getTotalRecords() << " registros" << std::endl;
+                    std::cout << "✅ Hash Extensible Múltiple construido: " << imei_index->getTotalRecords() << " registros GPS" << std::endl;
+                    imei_index->displayMultipleStatistics();
                 } else {
-                    std::cout << "❌ Hash Extensible vacío - verificar PageDirectory" << std::endl;
+                    std::cout << "❌ Hash Extensible Múltiple vacío - verificar PageDirectory" << std::endl;
                     return false;
                 }
                 
@@ -439,22 +443,24 @@ public:
     // ============================================================================
     
     /**
-     * @brief ✅ SELECT por IMEI mejorado con validaciones
+     * @brief ✅ SELECT por IMEI MÚLTIPLE - Muestra referencias Y datos físicos completos
      */
     void executeSelectByIMEI() {
         if (!imei_index) {
             std::cout << "❌ Hash Extensible no disponible" << std::endl;
-            std::cout << "💡 Seleccione Server A (opción 31) y construya índices (opción 32)" << std::endl;
+            std::cout << "💡 Pasos necesarios:" << std::endl;
+            std::cout << "   1. Cargar dataset GPS (opción 30)" << std::endl;
+            std::cout << "   2. Seleccionar Server A (opción 31)" << std::endl;
+            std::cout << "   3. Construir índices (opción 32)" << std::endl;
             return;
         }
 
-        std::cout << "\n🔍 CONSULTA POR IMEI (Hash Extensible O(1)):" << std::endl;
-        std::cout << "=============================================" << std::endl;
-        
-        // Sugerir IMEIs disponibles
-        std::cout << "💡 IMEIs disponibles en el dataset:" << std::endl;
+        std::cout << "\n🔍 CONSULTA MÚLTIPLE POR IMEI (Hash Extensible O(1)):" << std::endl;
+        std::cout << "======================================================" << std::endl;
+        std::cout << "📱 IMEIs disponibles en el dataset:" << std::endl;
         std::cout << "   • 868018071302858 (más común)" << std::endl;
         std::cout << "   • 863192057915457" << std::endl;
+        std::cout << "   • 868018070237402" << std::endl;
         std::cout << "   • Otros según los datos cargados" << std::endl;
         std::cout << std::endl;
         std::cout << "Ingrese IMEI a buscar: ";
@@ -469,32 +475,236 @@ public:
 
         auto start = std::chrono::high_resolution_clock::now();
         
-        RecordReference record_ref;
-        bool found = imei_index->search(imei, record_ref);
+        // ✅ BÚSQUEDA MÚLTIPLE - OBTENER TODAS LAS REFERENCIAS GPS DEL IMEI
+        std::vector<RecordReference> all_gps_records;
+        bool found = imei_index->searchAllGPSRecords(imei, all_gps_records);
         
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
-        if (found) {
-            std::cout << "\n✅ REGISTRO ENCONTRADO:" << std::endl;
-            std::cout << "   IMEI: " << imei << std::endl;
-            std::cout << "   RecordReference: " << record_ref.toString() << std::endl;
+        if (found && !all_gps_records.empty()) {
+            std::cout << "\n✅ REGISTROS GPS ENCONTRADOS EN ÍNDICE:" << std::endl;
+            std::cout << "   📱 IMEI: " << imei << std::endl;
+            std::cout << "   📊 Total registros temporales: " << all_gps_records.size() << std::endl;
+            std::cout << "   ⏱️ Tiempo de búsqueda en índice: " << duration.count() << " microsegundos" << std::endl;
+            std::cout << "   🚀 Complejidad: O(1) - acceso directo sin scan secuencial" << std::endl;
             
-            // Resolver detalles del registro
-            displayRecordDetails(record_ref);
+            // ✅ MOSTRAR REFERENCIAS (primeras 5)
+            std::cout << "\n📋 REFERENCIAS ENCONTRADAS EN HASH EXTENSIBLE (primeras 5):" << std::endl;
+            std::cout << std::string(100, '-') << std::endl;
+            
+            size_t references_displayed = 0;
+            for (const auto& record_ref : all_gps_records) {
+                if (references_displayed >= 5) break;
+                
+                std::cout << "📍 Referencia #" << (references_displayed + 1) << ": " 
+                          << record_ref.toString() << std::endl;
+                
+                references_displayed++;
+            }
+            
+            if (all_gps_records.size() > 5) {
+                std::cout << "... y " << (all_gps_records.size() - 5) << " referencias GPS más en el índice" << std::endl;
+            }
+            
+            // ✅ RESOLUCIÓN A DATOS FÍSICOS COMPLETOS (primeros 5)
+            std::cout << "\n🔍 RESOLVIENDO REFERENCIAS → DATOS FÍSICOS COMPLETOS:" << std::endl;
+            std::cout << std::string(100, '=') << std::endl;
+            
+            auto resolution_start = std::chrono::high_resolution_clock::now();
+            
+            size_t records_displayed = 0;
+            for (const auto& record_ref : all_gps_records) {
+                if (records_displayed >= 5) break;
+                
+                std::cout << "\n📍 REGISTRO GPS #" << (records_displayed + 1) << ":" << std::endl;
+                std::cout << "   🔗 RecordReference: " << record_ref.toString() << std::endl;
+                
+                // ✅ RESOLVER A DATOS COMPLETOS DESDE DISCO FÍSICO
+                displayFullGPSRecordFromReference(record_ref);
+                
+                records_displayed++;
+                
+                if (records_displayed < 5 && records_displayed < all_gps_records.size()) {
+                    std::cout << "\n" << std::string(80, '-') << std::endl;
+                }
+            }
+            
+            auto resolution_end = std::chrono::high_resolution_clock::now();
+            auto resolution_duration = std::chrono::duration_cast<std::chrono::microseconds>(resolution_end - resolution_start);
+            
+            if (all_gps_records.size() > 5) {
+                std::cout << "\n📊 MUESTRA LIMITADA: Solo se muestran los primeros 5 registros físicos" << std::endl;
+                std::cout << "   💡 Hay " << (all_gps_records.size() - 5) << " registros GPS adicionales del mismo IMEI" << std::endl;
+            }
+            
+            // ✅ ANÁLISIS TEMPORAL Y DE RENDIMIENTO
+            std::cout << "\n📈 ANÁLISIS TEMPORAL DEL DISPOSITIVO:" << std::endl;
+            std::cout << "   🕐 Total señales GPS registradas: " << all_gps_records.size() << std::endl;
+            std::cout << "   ⏰ Frecuencia estimada: ~cada 30 segundos" << std::endl;
+            std::cout << "   📊 Período estimado cubierto: " << (all_gps_records.size() * 30 / 3600.0) << " horas de tracking" << std::endl;
+            std::cout << "   🔄 Tipo de datos: Tracking GPS en tiempo real" << std::endl;
+            
+            std::cout << "\n⏱️ ANÁLISIS DE RENDIMIENTO COMPLETO:" << std::endl;
+            std::cout << "   🔍 Tiempo búsqueda en índice: " << duration.count() << " μs" << std::endl;
+            std::cout << "   💾 Tiempo resolución física (5 registros): " << resolution_duration.count() << " μs" << std::endl;
+            std::cout << "   📊 Total registros indexados: " << imei_index->getTotalRecords() << " referencias GPS" << std::endl;
+            std::cout << "   🚀 Complejidad consulta: O(1) para encontrar + O(k) para resolver" << std::endl;
+            std::cout << "   📈 Escalabilidad: Independiente del tamaño total de la tabla" << std::endl;
+            
+            std::cout << "\n🎯 EXPLICACIÓN TÉCNICA:" << std::endl;
+            std::cout << "   1. 🔗 Hash Extensible almacena solo RecordReference (32 bytes c/u)" << std::endl;
+            std::cout << "   2. 📍 RecordReference apunta a ubicación física en disco" << std::endl;
+            std::cout << "   3. 💾 DiskManager lee bloques completos desde archivos sector_X.txt" << std::endl;
+            std::cout << "   4. 🔍 Se busca el registro específico por slot_id dentro del bloque" << std::endl;
+            std::cout << "   5. ✅ Se extraen todos los campos GPS usando getFieldValues()" << std::endl;
             
         } else {
-            std::cout << "\n❌ IMEI NO ENCONTRADO: " << imei << std::endl;
-            std::cout << "💡 Verifique que:" << std::endl;
-            std::cout << "   • El IMEI existe en los datos cargados" << std::endl;
-            std::cout << "   • Los índices están construidos correctamente" << std::endl;
-            std::cout << "   • Use opción 50 para ver estadísticas del índice" << std::endl;
+            std::cout << "\n❌ IMEI NO ENCONTRADO EN ÍNDICE: " << imei << std::endl;
+            std::cout << "💡 Verificaciones:" << std::endl;
+            std::cout << "   • ¿El IMEI está escrito correctamente?" << std::endl;
+            std::cout << "   • ¿Los datos GPS fueron cargados (opción 30)?" << std::endl;
+            std::cout << "   • ¿El índice fue construido (opción 32)?" << std::endl;
+            
+            // Mostrar algunos IMEIs disponibles si hay registros
+            if (imei_index->getTotalRecords() > 0) {
+                std::cout << "\n📋 IMEIs disponibles en el índice:" << std::endl;
+                auto all_keys = imei_index->getAllKeys();
+                size_t shown = 0;
+                for (const auto& key : all_keys) {
+                    if (shown >= 5) break;
+                    std::cout << "   • " << key << std::endl;
+                    shown++;
+                }
+                if (all_keys.size() > 5) {
+                    std::cout << "   ... y " << (all_keys.size() - 5) << " IMEIs más" << std::endl;
+                }
+            }
         }
+    }
 
-        std::cout << "\n⏱️ RENDIMIENTO:" << std::endl;
-        std::cout << "   Tiempo: " << duration.count() << " microsegundos" << std::endl;
-        std::cout << "   Complejidad: O(1) - acceso directo por hash" << std::endl;
-        std::cout << "   Índice: " << imei_index->getTotalRecords() << " registros indexados" << std::endl;
+    /**
+     * @brief ✅ FUNCIÓN COMPLETA - Resolver RecordReference a datos GPS reales desde disco
+     */
+    void displayFullGPSRecordFromReference(const RecordReference& record_ref) {
+        std::cout << "\n🔍 RESOLVIENDO RecordReference → Datos GPS desde disco físico:" << std::endl;
+        std::cout << "   📍 Dirección física: " << record_ref.getPhysicalAddress().toString() << std::endl;
+        std::cout << "   🎯 Slot ID: " << record_ref.getSlotId() << std::endl;
+        std::cout << "   📄 Page ID: " << record_ref.getPageId() << std::endl;
+        
+        // ✅ PASO 1: Crear bloque para cargar datos desde disco
+        Block sector_block(record_ref.getPhysicalAddress(), 4096);
+        
+        // ✅ PASO 2: Leer bloque completo desde archivo físico
+        if (!disk_manager->readBlock(record_ref.getPhysicalAddress(), sector_block)) {
+            std::cout << "   ❌ Error leyendo bloque desde disco físico" << std::endl;
+            return;
+        }
+        
+        std::cout << "   ✅ Bloque cargado desde disco: " << record_ref.getPhysicalAddress().toString() << std::endl;
+        
+        // ✅ PASO 3: Obtener todos los registros activos del bloque
+        auto active_records = sector_block.getActiveRecords();
+        std::cout << "   📊 Registros activos en bloque: " << active_records.size() << std::endl;
+        
+        // ✅ PASO 4: Buscar el registro específico por slot_id
+        bool found = false;
+        for (const auto& record : active_records) {
+            if (record->getId() == record_ref.getSlotId()) {
+                found = true;
+                
+                std::cout << "\n✅ REGISTRO GPS COMPLETO ENCONTRADO EN DISCO:" << std::endl;
+                std::cout << "   🆔 Record ID: " << record->getId() << std::endl;
+                
+                // ✅ PASO 5: Extraer todos los campos GPS usando getFieldValues()
+                const auto& field_values = record->getFieldValues();
+                
+                if (field_values.size() >= 21) {
+                    // Mapeo según tu esquema GPS completo
+                    std::cout << "   📱 IMEI: " << cleanQuotes(field_values[1]) << std::endl;
+                    std::cout << "   🆔 Command ID: " << field_values[2] << std::endl;
+                    std::cout << "   📅 Timestamp: " << cleanQuotes(field_values[3]) << std::endl;
+                    std::cout << "   🗺️  Latitud: " << field_values[4] << "°" << std::endl;
+                    std::cout << "   🗺️  Longitud: " << field_values[5] << "°" << std::endl;
+                    std::cout << "   📍 Record Index: " << field_values[6] << std::endl;
+                    std::cout << "   ⏰ Timestamp Extension: " << field_values[7] << std::endl;
+                    std::cout << "   🔢 Record Extension: " << field_values[8] << std::endl;
+                    std::cout << "   ⚡ Prioridad: " << field_values[9] << std::endl;
+                    std::cout << "   🏔️  Altitud: " << field_values[10] << " m" << std::endl;
+                    std::cout << "   🧭 Ángulo: " << field_values[11] << "°" << std::endl;
+                    std::cout << "   🛰️  Satélites: " << field_values[12] << std::endl;
+                    std::cout << "   🚗 Velocidad: " << field_values[13] << " km/h" << std::endl;
+                    std::cout << "   📡 HDOP: " << field_values[14] << std::endl;
+                    std::cout << "   🎯 Event ID: " << field_values[15] << std::endl;
+                    std::cout << "   📍 Punto: " << cleanQuotes(field_values[16]) << std::endl;
+                    std::cout << "   🔧 IO Elements: " << cleanQuotes(field_values[17]) << std::endl;
+                    std::cout << "   ⚙️  Procesado en: " << cleanQuotes(field_values[18]) << std::endl;
+                    std::cout << "   📝 Creado en: " << cleanQuotes(field_values[19]) << std::endl;
+                    std::cout << "   🔄 Actualizado en: " << cleanQuotes(field_values[20]) << std::endl;
+                    
+                    // ✅ ANÁLISIS GEOESPACIAL AUTOMÁTICO
+                    std::cout << "\n📊 ANÁLISIS GEOESPACIAL AUTOMÁTICO:" << std::endl;
+                    try {
+                        double lat = std::stod(field_values[4]);
+                        double lon = std::stod(field_values[5]);
+                        double altitude = std::stod(field_values[10]);
+                        int satellites = std::stoi(field_values[12]);
+                        int speed = std::stoi(field_values[13]);
+                        
+                        std::cout << "   🌍 Coordenadas: (" << lat << ", " << lon << ")" << std::endl;
+                        std::cout << "   📏 Precisión GPS: " << (satellites >= 8 ? "ALTA" : "MEDIA") 
+                                  << " (" << satellites << " satélites)" << std::endl;
+                        std::cout << "   🚦 Estado movimiento: " << (speed > 5 ? "EN MOVIMIENTO" : "ESTACIONARIO") << std::endl;
+                        std::cout << "   🏔️  Altitud sobre nivel del mar: " << altitude << " metros" << std::endl;
+                        
+                        // Determinar ubicación aproximada (para Perú)
+                        if (lat >= -18.5 && lat <= -10.0 && lon >= -81.5 && lon <= -68.0) {
+                            std::cout << "   🇵🇪 Ubicación estimada: Perú" << std::endl;
+                            if (altitude > 3500) {
+                                std::cout << "   🏔️  Zona: Altiplano/Sierra (alta altitud)" << std::endl;
+                            } else if (altitude > 500) {
+                                std::cout << "   🏔️  Zona: Sierra/Andes" << std::endl;
+                            } else {
+                                std::cout << "   🏖️  Zona: Costa" << std::endl;
+                            }
+                        }
+                        
+                    } catch (const std::exception& e) {
+                        std::cout << "   ⚠️ Error parseando datos numéricos para análisis" << std::endl;
+                    }
+                    
+                } else {
+                    std::cout << "   ❌ Registro con campos insuficientes: " << field_values.size() << "/21 esperados" << std::endl;
+                    std::cout << "   💡 Campos disponibles: ";
+                    for (size_t i = 0; i < field_values.size(); ++i) {
+                        std::cout << "[" << i << "]'" << field_values[i].substr(0, 10) << "...' ";
+                    }
+                    std::cout << std::endl;
+                }
+                
+                break;
+            }
+        }
+        
+        if (!found) {
+            std::cout << "   ❌ Registro con slot ID " << record_ref.getSlotId() 
+                      << " no encontrado en bloque" << std::endl;
+            std::cout << "   💡 IDs disponibles en bloque: ";
+            for (const auto& record : active_records) {
+                std::cout << record->getId() << " ";
+            }
+            std::cout << std::endl;
+        }
+    }
+    
+    /**
+     * @brief Función auxiliar para limpiar comillas de strings
+     */
+    std::string cleanQuotes(const std::string& str) {
+        if (str.length() >= 2 && str.front() == '"' && str.back() == '"') {
+            return str.substr(1, str.length() - 2);
+        }
+        return str;
     }
 
     // ============================================================================

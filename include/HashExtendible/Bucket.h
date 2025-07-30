@@ -7,6 +7,8 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <unordered_map>
+#include <set>
 #include "../Record.h"
 #include "../RecordReference.h"
 
@@ -22,19 +24,22 @@
  */
 class Bucket {
 private:
-    std::vector<std::pair<std::string, RecordReference>> entries; // Clave -> RecordReference
+    std::vector<std::pair<std::string, RecordReference>> entries; // Clave -> RecordReference (modo simple)
+    std::unordered_map<std::string, std::vector<RecordReference>> entries_multiple; // Clave -> Vector de RecordReference (modo múltiple)
     int local_depth;                                              // Profundidad local del bucket
     int capacity;                                                 // Capacidad máxima
     size_t access_count;                                          // Contador de accesos (estadísticas)
+    bool multiple_mode;                                           // Flag para modo múltiple
 
 public:
     /**
      * @brief Constructor
      */
-    Bucket(int cap = 4, int depth = 0) 
+    Bucket(int cap = 4, int depth = 0, bool enable_multiple = false) 
         : local_depth(depth)
         , capacity(cap)
         , access_count(0)
+        , multiple_mode(enable_multiple)
     {
         entries.reserve(capacity);
     }
@@ -395,24 +400,228 @@ public:
         return removed;
     }
 
+    // ============================================================================
+    // ✅ MODO MÚLTIPLE - NUEVAS FUNCIONALIDADES PARA GPS
+    // ============================================================================
+    
     /**
-     * @brief Verifica consistencia interna del bucket
+     * @brief ✅ Activar/desactivar modo múltiple
      */
-    bool validateConsistency() const {
-        // Verificar capacidad
-        if (entries.size() > static_cast<size_t>(capacity)) {
-            std::cout << "❌ Bucket excede capacidad: " << entries.size() << " > " << capacity << std::endl;
+    void setMultipleMode(bool enabled) {
+        multiple_mode = enabled;
+        if (enabled) {
+            std::cout << "🔄 Bucket configurado en modo múltiple" << std::endl;
+        }
+    }
+
+    bool isMultipleMode() const {
+        return multiple_mode;
+    }
+
+    /**
+     * @brief ✅ Inserción múltiple - permite varios registros por clave
+     */
+    bool insertMultiple(const std::string& key, const RecordReference& record_ref) {
+        access_count++;
+        
+        if (!multiple_mode) {
+            // Modo de compatibilidad - usar inserción simple
+            return insert(key, record_ref);
+        }
+
+        // ✅ MODO MÚLTIPLE: Agregar a la lista del IMEI
+        entries_multiple[key].push_back(record_ref);
+        
+        std::cout << "📝 Bucket múltiple: IMEI '" << key << "' ahora tiene " 
+                  << entries_multiple[key].size() << " registros" << std::endl;
+        
+        return true;
+    }
+
+    /**
+     * @brief ✅ Búsqueda múltiple - retorna todos los registros de una clave
+     */
+    bool searchMultiple(const std::string& key, std::vector<RecordReference>& results) {
+        access_count++;
+        
+        if (!multiple_mode) {
+            // Modo de compatibilidad
+            RecordReference single_ref;
+            if (search(key, single_ref)) {
+                results.push_back(single_ref);
+                return true;
+            }
             return false;
         }
 
-        // Verificar claves únicas
-        std::set<std::string> unique_keys;
-        for (const auto& entry : entries) {
-            if (unique_keys.find(entry.first) != unique_keys.end()) {
-                std::cout << "❌ Clave duplicada en bucket: " << entry.first << std::endl;
+        auto it = entries_multiple.find(key);
+        if (it != entries_multiple.end()) {
+            results = it->second;  // Copiar todo el vector
+            return !results.empty();
+        }
+        return false;
+    }
+
+    /**
+     * @brief ✅ Verificar si necesita split en modo múltiple
+     */
+    bool needsSplitMultiple(const std::string& key) {
+        if (!multiple_mode) {
+            return needsSplit(key);
+        }
+
+        // En modo múltiple, el split se basa en número de IMEIs únicos, no registros totales
+        size_t unique_keys = entries_multiple.size();
+        
+        // Solo hacer split si ya existe el IMEI Y tenemos muchos IMEIs únicos
+        if (entries_multiple.find(key) == entries_multiple.end()) {
+            // IMEI nuevo: verificar si cabe
+            return (unique_keys >= static_cast<size_t>(capacity));
+        }
+        
+        // IMEI existente: siempre cabe (solo agregar a la lista)
+        return false;
+    }
+
+    /**
+     * @brief ✅ Split para modo múltiple
+     */
+    std::shared_ptr<Bucket> splitMultiple() {
+        if (!multiple_mode) {
+            return split();  // Usar split tradicional
+        }
+
+        auto new_bucket = std::make_shared<Bucket>(capacity, local_depth + 1, true);
+        
+        // ✅ REDISTRIBUIR POR HASH DE IMEI
+        auto it = entries_multiple.begin();
+        while (it != entries_multiple.end()) {
+            const std::string& key = it->first;
+            auto& record_list = it->second;
+            
+            // Calcular a qué bucket debe ir cada IMEI
+            size_t hash_value = std::hash<std::string>{}(key);
+            size_t bit_mask = 1ULL << local_depth;
+            
+            if (hash_value & bit_mask) {
+                // Va al bucket nuevo
+                new_bucket->entries_multiple[key] = std::move(record_list);
+                it = entries_multiple.erase(it);
+            } else {
+                // Se queda en bucket actual
+                ++it;
+            }
+        }
+        
+        // Incrementar profundidad local
+        local_depth++;
+        
+        std::cout << "🔄 Split múltiple completado: " 
+                  << entries_multiple.size() << " IMEIs en bucket original, "
+                  << new_bucket->entries_multiple.size() << " en bucket nuevo" << std::endl;
+        
+        return new_bucket;
+    }
+
+    /**
+     * @brief ✅ Obtener total de registros incluyendo múltiples
+     */
+    size_t getTotalRecordsMultiple() const {
+        if (!multiple_mode) {
+            return getRecordCount();
+        }
+
+        size_t total = 0;
+        for (const auto& pair : entries_multiple) {
+            total += pair.second.size();
+        }
+        return total;
+    }
+
+    /**
+     * @brief ✅ Obtener número de claves únicas en modo múltiple
+     */
+    size_t getUniqueKeysCount() const {
+        if (multiple_mode) {
+            return entries_multiple.size();
+        } else {
+            return entries.size();
+        }
+    }
+
+    /**
+     * @brief ✅ Estadísticas del modo múltiple
+     */
+    void displayMultipleStatistics() const {
+        if (!multiple_mode) {
+            std::cout << "⚠️ Bucket en modo simple" << std::endl;
+            return;
+        }
+
+        std::cout << "\n📊 ESTADÍSTICAS BUCKET MÚLTIPLE:" << std::endl;
+        std::cout << "   Claves únicas (IMEIs): " << entries_multiple.size() << std::endl;
+        
+        size_t total_records = 0;
+        size_t max_records_per_key = 0;
+        std::string most_active_key;
+        
+        for (const auto& pair : entries_multiple) {
+            size_t records_count = pair.second.size();
+            total_records += records_count;
+            
+            if (records_count > max_records_per_key) {
+                max_records_per_key = records_count;
+                most_active_key = pair.first;
+            }
+        }
+        
+        std::cout << "   Total registros GPS: " << total_records << std::endl;
+        if (!entries_multiple.empty()) {
+            std::cout << "   Promedio por IMEI: " << (total_records / entries_multiple.size()) << std::endl;
+            std::cout << "   IMEI más activo: " << most_active_key.substr(0, 12) << "... (" 
+                      << max_records_per_key << " registros)" << std::endl;
+        }
+    }
+
+    // ============================================================================
+    // VALIDACIÓN Y CONSISTENCIA
+    // ============================================================================
+
+    /**
+     * @brief Verifica consistencia interna del bucket (incluyendo modo múltiple)
+     */
+    bool validateConsistency() const {
+        if (multiple_mode) {
+            // Verificar modo múltiple
+            if (entries_multiple.size() > static_cast<size_t>(capacity)) {
+                std::cout << "❌ Bucket múltiple excede capacidad: " << entries_multiple.size() 
+                          << " > " << capacity << std::endl;
                 return false;
             }
-            unique_keys.insert(entry.first);
+            
+            // Verificar que no hay listas vacías
+            for (const auto& pair : entries_multiple) {
+                if (pair.second.empty()) {
+                    std::cout << "❌ Lista vacía para clave: " << pair.first << std::endl;
+                    return false;
+                }
+            }
+        } else {
+            // Verificar modo simple
+            if (entries.size() > static_cast<size_t>(capacity)) {
+                std::cout << "❌ Bucket excede capacidad: " << entries.size() << " > " << capacity << std::endl;
+                return false;
+            }
+
+            // Verificar claves únicas
+            std::set<std::string> unique_keys;
+            for (const auto& entry : entries) {
+                if (unique_keys.find(entry.first) != unique_keys.end()) {
+                    std::cout << "❌ Clave duplicada en bucket: " << entry.first << std::endl;
+                    return false;
+                }
+                unique_keys.insert(entry.first);
+            }
         }
 
         return true;

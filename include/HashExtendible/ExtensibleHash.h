@@ -29,6 +29,7 @@ private:
     std::unique_ptr<Directory> directory;
     int bucket_capacity;
     size_t total_records;
+    bool multiple_records_mode;  // ✅ NUEVO: Flag para modo múltiple
     
     // Estadísticas
     size_t insert_operations;
@@ -38,18 +39,20 @@ private:
 
 public:
     /**
-     * @brief Constructor
+     * @brief Constructor con modo múltiple opcional
      */
-    ExtensibleHash(int capacity = 4) 
+    ExtensibleHash(int capacity = 4, bool enable_multiple = false) 
         : bucket_capacity(capacity)
         , total_records(0)
+        , multiple_records_mode(enable_multiple)
         , insert_operations(0)
         , search_operations(0)
         , split_operations(0)
         , directory_expansions(0) {
         
-        directory = std::make_unique<Directory>(capacity);
-        std::cout << "🔗 Hash Extensible inicializado (capacidad: " << capacity << ")" << std::endl;
+        directory = std::make_unique<Directory>(capacity, enable_multiple);
+        std::cout << "🔗 Hash Extensible inicializado (capacidad: " << capacity 
+                  << ", modo múltiple: " << (enable_multiple ? "ON" : "OFF") << ")" << std::endl;
     }
     
     // ============================================================================
@@ -551,6 +554,210 @@ public:
 
         if (is_consistent) {
             std::cout << "✅ Hash Extensible consistente" << std::endl;
+        }
+
+        return is_consistent;
+    }
+
+    // ============================================================================
+    // ✅ MODO MÚLTIPLE - NUEVAS FUNCIONALIDADES PARA GPS
+    // ============================================================================
+    
+    /**
+     * @brief ✅ Activar modo múltiple dinámicamente
+     */
+    void enableMultipleMode() {
+        multiple_records_mode = true;
+        // Configurar todos los buckets existentes
+        auto unique_buckets = directory->getUniqueBuckets();
+        for (auto& bucket : unique_buckets) {
+            bucket->setMultipleMode(true);
+        }
+        std::cout << "✅ Modo múltiple activado en " << unique_buckets.size() << " buckets" << std::endl;
+    }
+
+    bool isMultipleModeEnabled() const {
+        return multiple_records_mode;
+    }
+
+    /**
+     * @brief ✅ NUEVA FUNCIÓN: Inserción múltiple para GPS
+     */
+    bool insertReferenceMultiple(const std::string& key, const RecordReference& record_ref) {
+        if (!multiple_records_mode) {
+            return insertReference(key, record_ref);  // Usar modo simple
+        }
+
+        if (key.empty() || !record_ref.isValid()) {
+            return false;
+        }
+
+        insert_operations++;
+
+        auto bucket = directory->getBucket(key);
+        if (!bucket) {
+            std::cout << "❌ Error: No se pudo obtener bucket para clave: " << key << std::endl;
+            return false;
+        }
+
+        // ✅ VERIFICAR SPLIT CON LÓGICA MÚLTIPLE
+        if (bucket->needsSplitMultiple(key)) {
+            std::cout << "🔄 Bucket lleno (IMEIs únicos), iniciando split para: " << key << std::endl;
+            
+            if (!handleBucketSplitMultiple(key)) {
+                std::cout << "❌ Error en split múltiple" << std::endl;
+                return false;
+            }
+
+            bucket = directory->getBucket(key);
+        }
+
+        // ✅ INSERTAR EN MODO MÚLTIPLE
+        if (bucket->insertMultiple(key, record_ref)) {
+            total_records++;
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @brief ✅ NUEVA FUNCIÓN: Búsqueda múltiple para GPS
+     */
+    bool searchMultiple(const std::string& key, std::vector<RecordReference>& results) {
+        if (!multiple_records_mode) {
+            RecordReference single_ref;
+            if (search(key, single_ref)) {
+                results.push_back(single_ref);
+                return true;
+            }
+            return false;
+        }
+
+        search_operations++;
+
+        auto bucket = directory->getBucket(key);
+        if (!bucket) {
+            return false;
+        }
+
+        return bucket->searchMultiple(key, results);
+    }
+
+    /**
+     * @brief ✅ FUNCIÓN PRINCIPAL para insertar registros GPS
+     */
+    bool insertGPSRecord(const std::string& imei, const RecordReference& record_ref) {
+        return insertReferenceMultiple(imei, record_ref);
+    }
+
+    /**
+     * @brief ✅ FUNCIÓN PRINCIPAL para consultas GPS completas
+     */
+    bool searchAllGPSRecords(const std::string& imei, std::vector<RecordReference>& all_records) {
+        return searchMultiple(imei, all_records);
+    }
+
+    /**
+     * @brief ✅ Estadísticas del modo múltiple
+     */
+    void displayMultipleStatistics() const {
+        if (!multiple_records_mode) {
+            std::cout << "⚠️ Modo múltiple no activado" << std::endl;
+            return;
+        }
+
+        std::cout << "\n📊 ESTADÍSTICAS MODO MÚLTIPLE:" << std::endl;
+        std::cout << "=============================" << std::endl;
+
+        auto unique_buckets = directory->getUniqueBuckets();
+        size_t total_unique_keys = 0;
+        size_t total_all_records = 0;
+
+        for (const auto& bucket : unique_buckets) {
+            total_unique_keys += bucket->getUniqueKeysCount();
+            total_all_records += bucket->getTotalRecordsMultiple();
+        }
+
+        std::cout << "IMEIs únicos indexados: " << total_unique_keys << std::endl;
+        std::cout << "Total registros GPS: " << total_all_records << std::endl;
+        std::cout << "Promedio registros por IMEI: " 
+                  << (total_unique_keys > 0 ? (total_all_records / total_unique_keys) : 0) << std::endl;
+        std::cout << "Buckets utilizados: " << unique_buckets.size() << std::endl;
+        
+        // Mostrar distribución por bucket
+        std::cout << "\n📊 DISTRIBUCIÓN POR BUCKET:" << std::endl;
+        for (size_t i = 0; i < unique_buckets.size(); i++) {
+            std::cout << "  Bucket " << i << ": " 
+                      << unique_buckets[i]->getUniqueKeysCount() << " IMEIs, "
+                      << unique_buckets[i]->getTotalRecordsMultiple() << " registros" << std::endl;
+        }
+    }
+
+private:
+    /**
+     * @brief ✅ Manejo de split múltiple
+     */
+    bool handleBucketSplitMultiple(const std::string& key) {
+        auto bucket = directory->getBucket(key);
+        if (!bucket) {
+            return false;
+        }
+
+        split_operations++;
+
+        if (bucket->getLocalDepth() == directory->getGlobalDepth()) {
+            std::cout << "📈 Expandiendo directorio para modo múltiple" << std::endl;
+            
+            if (!directory->expand()) {
+                return false;
+            }
+            directory_expansions++;
+        }
+
+        auto new_bucket = bucket->splitMultiple();
+        if (!new_bucket) {
+            return false;
+        }
+
+        return directory->updateAfterSplit(bucket, new_bucket);
+    }
+
+public:
+    /**
+     * @brief ✅ Verificación de consistencia incluyendo modo múltiple
+     */
+    bool validateConsistencyMultiple() const {
+        if (!multiple_records_mode) {
+            return validateConsistency();
+        }
+
+        std::cout << "\n🔍 VERIFICANDO CONSISTENCIA MODO MÚLTIPLE..." << std::endl;
+        
+        bool is_consistent = true;
+        auto unique_buckets = directory->getUniqueBuckets();
+        
+        // Verificar cada bucket
+        for (const auto& bucket : unique_buckets) {
+            if (!bucket->validateConsistency()) {
+                is_consistent = false;
+            }
+        }
+        
+        // Contar registros totales
+        size_t counted_records = 0;
+        for (const auto& bucket : unique_buckets) {
+            counted_records += bucket->getTotalRecordsMultiple();
+        }
+        
+        if (counted_records != total_records) {
+            std::cout << "❌ Conteo de registros múltiples inconsistente: " 
+                      << counted_records << " != " << total_records << std::endl;
+            is_consistent = false;
+        }
+
+        if (is_consistent) {
+            std::cout << "✅ Hash Extensible Múltiple consistente" << std::endl;
         }
 
         return is_consistent;

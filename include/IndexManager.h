@@ -344,6 +344,130 @@ public:
     }
 
     // ============================================================================
+    // ✅ CONSTRUCCIÓN DE ÍNDICE MÚLTIPLE PARA GPS
+    // ============================================================================
+    
+    /**
+     * @brief ✅ NUEVA FUNCIÓN - Construir Hash Extensible Múltiple para GPS
+     */
+    std::unique_ptr<ExtensibleHash> buildHashIndexMultipleFromDisk(
+        const std::string& table_name,
+        const std::string& key_field,
+        int max_records = -1
+    ) {
+        std::cout << "\n🔨 CONSTRUYENDO HASH EXTENSIBLE MÚLTIPLE (GPS OPTIMIZADO)" << std::endl;
+        std::cout << "Tabla: " << table_name << std::endl;
+        std::cout << "Campo clave: " << key_field << std::endl;
+        std::cout << "🎯 Objetivo: Múltiples registros GPS por IMEI" << std::endl;
+        std::cout << "=" << std::string(60, '=') << std::endl;
+
+        // ✅ VERIFICACIONES PREVIAS
+        if (!disk_manager) {
+            std::cout << "❌ ERROR CRÍTICO: DiskManager no disponible" << std::endl;
+            return std::make_unique<ExtensibleHash>(4, true);
+        }
+
+        if (!verifyPageDirectoryIntegrity()) {
+            std::cout << "⚠️ PageDirectory desincronizado - corrigiendo..." << std::endl;
+            disk_manager->forcePageDirectorySync();
+        }
+
+        // ✅ CREAR HASH EXTENSIBLE EN MODO MÚLTIPLE
+        auto hash_index = std::make_unique<ExtensibleHash>(4, true); // capacity=4, multiple=true
+        hash_index->enableMultipleMode();
+        
+        std::vector<PhysicalAddress> table_pages;
+        if (!disk_manager->getTablePages(table_name, table_pages) || table_pages.empty()) {
+            std::cout << "❌ ERROR: No se pudieron obtener páginas" << std::endl;
+            return hash_index;
+        }
+
+        std::cout << "✅ Páginas obtenidas: " << table_pages.size() << std::endl;
+
+        int records_processed = 0;
+        int records_skipped = 0;
+        std::unordered_set<std::string> unique_keys;
+
+        // ✅ PROCESAMIENTO OPTIMIZADO PARA MÚLTIPLES REGISTROS
+        for (size_t page_idx = 0; page_idx < table_pages.size(); page_idx++) {
+            const auto& page_addr = table_pages[page_idx];
+            
+            if (max_records != -1 && records_processed >= max_records) {
+                break;
+            }
+
+            std::cout << "📄 Procesando página " << (page_idx + 1) << "/" << table_pages.size() 
+                      << ": " << page_addr.toString() << std::endl;
+
+            Block page_block(page_addr, 4096);
+            if (!disk_manager->readBlock(page_addr, page_block)) {
+                continue;
+            }
+
+            auto active_records = page_block.getActiveRecords();
+            std::cout << "   📝 Registros activos: " << active_records.size() << std::endl;
+
+            // ✅ PROCESAR TODOS LOS REGISTROS (SIN FILTRO DE DUPLICADOS)
+            for (const auto& record : active_records) {
+                if (max_records != -1 && records_processed >= max_records) {
+                    break;
+                }
+
+                if (record->isDeleted()) {
+                    records_skipped++;
+                    continue;
+                }
+
+                // Extraer clave
+                std::string key = extractKeyFromRecord(record, key_field);
+                if (key.empty()) {
+                    records_skipped++;
+                    continue;
+                }
+
+                // ✅ CONTAR CLAVES ÚNICAS PARA ESTADÍSTICAS
+                unique_keys.insert(key);
+
+                // ✅ CREAR RecordReference E INSERTAR EN MODO MÚLTIPLE
+                RecordReference record_ref = disk_manager->createRecordReference(page_addr, record->getId());
+                record_ref.setCachedKey(key);
+
+                if (hash_index->insertGPSRecord(key, record_ref)) {
+                    records_processed++;
+                    
+                    if (records_processed % 200 == 0) {
+                        std::cout << "📈 Procesados: " << records_processed << " registros GPS" << std::endl;
+                    }
+                } else {
+                    std::cout << "   ❌ Error insertando registro GPS" << std::endl;
+                }
+            }
+        }
+
+        // ✅ REPORTE FINAL MÚLTIPLE
+        std::cout << "\n✅ HASH EXTENSIBLE MÚLTIPLE CONSTRUIDO EXITOSAMENTE:" << std::endl;
+        std::cout << "   📊 Total registros GPS procesados: " << records_processed << std::endl;
+        std::cout << "   ⚠️ Registros omitidos: " << records_skipped << std::endl;
+        std::cout << "   📄 Páginas procesadas: " << table_pages.size() << std::endl;
+        std::cout << "   🔍 IMEIs únicos: " << unique_keys.size() << std::endl;
+        std::cout << "   📊 Promedio registros por IMEI: " 
+                  << (unique_keys.size() > 0 ? (records_processed / unique_keys.size()) : 0) << std::endl;
+        std::cout << "   🎯 Eficiencia: " << std::fixed << std::setprecision(1) 
+                  << (100.0 * records_processed / (records_processed + records_skipped)) << "%" << std::endl;
+
+        // ✅ MOSTRAR ESTADÍSTICAS DETALLADAS
+        hash_index->displayMultipleStatistics();
+
+        if (records_processed == 0) {
+            std::cout << "\n❌ ADVERTENCIA: Índice múltiple construido pero VACÍO" << std::endl;
+        } else {
+            std::cout << "\n🚀 ÍNDICE MÚLTIPLE LISTO PARA CONSULTAS O(1) POR IMEI" << std::endl;
+        }
+
+        return hash_index;
+    }
+
+    // ============================================================================
     // ✅ MÉTODOS DE VERIFICACIÓN Y DIAGNÓSTICO
     // ============================================================================
 

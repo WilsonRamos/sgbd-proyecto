@@ -34,20 +34,21 @@ private:
 
 public:
     /**
-     * @brief Constructor
+     * @brief Constructor con soporte para modo múltiple
      */
-    Directory(int capacity = 4) : global_depth(0), bucket_capacity(capacity) {
+    Directory(int capacity = 4, bool enable_multiple = false) : global_depth(0), bucket_capacity(capacity) {
         directory_size = 1 << global_depth; // 2^global_depth
         directory.resize(directory_size);
         
-        // Crear bucket inicial
-        auto initial_bucket = std::make_shared<Bucket>(bucket_capacity, 0);
+        // Crear bucket inicial con modo múltiple si está habilitado
+        auto initial_bucket = std::make_shared<Bucket>(bucket_capacity, 0, enable_multiple);
         for (size_t i = 0; i < directory_size; i++) {
             directory[i] = initial_bucket;
         }
         
         std::cout << "📁 Directorio inicializado (profundidad: " << global_depth 
-                  << ", tamaño: " << directory_size << ")" << std::endl;
+                  << ", tamaño: " << directory_size 
+                  << ", modo múltiple: " << (enable_multiple ? "ON" : "OFF") << ")" << std::endl;
     }
 
     // ============================================================================
