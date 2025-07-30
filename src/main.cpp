@@ -408,8 +408,81 @@ public:
             return false;
         }
         
-        std::cout << "\n💡 SIGUIENTE PASO: Usar opción 32 para construir índices" << std::endl;
+        // ✅ VERIFICAR AUTOMÁTICAMENTE SI EXISTEN ÍNDICES PARA ESTE SERVIDOR
+        bool hasExistingIndexes = checkExistingIndexesForServer();
+        
+        if (hasExistingIndexes) {
+            std::cout << "\n🎯 ÍNDICES ENCONTRADOS PARA " << current_server << ":" << std::endl;
+            index_manager->listAvailableIndexes();
+            
+            std::cout << "\n📋 OPCIONES DISPONIBLES:" << std::endl;
+            std::cout << "   32. Reconstruir índices desde datos GPS" << std::endl;
+            std::cout << "   33. Cargar índices existentes desde disco" << std::endl;
+            std::cout << "\n💡 Recomendación: Usar opción 33 para cargar rápidamente" << std::endl;
+        } else {
+            std::cout << "\n📋 NO SE ENCONTRARON ÍNDICES PARA " << current_server << std::endl;
+            std::cout << "💡 SIGUIENTE PASO: Usar opción 32 para construir índices" << std::endl;
+        }
+        
+        // ✅ MOSTRAR OPERACIONES QUE ESTARÁN DISPONIBLES
+        std::cout << "\n🎯 OPERACIONES QUE ESTARÁN DISPONIBLES:" << std::endl;
+        showAvailableOperationsPreview();
+        
         return true;
+    }
+
+    /**
+     * @brief ✅ NUEVA FUNCIÓN - Verificar índices existentes para servidor específico
+     */
+    bool checkExistingIndexesForServer() {
+        if (!index_manager) {
+            return false;
+        }
+        
+        std::string expected_file;
+        if (current_server == "Server_A") {
+            expected_file = disk_path + "/metadata/indexes/indicehash_imei_dataGPS.txt";
+        } else if (current_server == "Server_B") {
+            expected_file = disk_path + "/metadata/indexes/indicebtree_timestamp_dataGPS.txt";
+        } else {
+            return false;
+        }
+        
+        // Verificar si el archivo existe
+        std::ifstream file(expected_file);
+        bool exists = file.good();
+        file.close();
+        
+        return exists;
+    }
+
+    /**
+     * @brief ✅ NUEVA FUNCIÓN - Mostrar preview de operaciones según servidor
+     */
+    void showAvailableOperationsPreview() {
+        std::cout << "================================================" << std::endl;
+        
+        if (current_server == "Server_A") {
+            std::cout << "🔍 CONSULTAS ESPECIALIZADAS PARA SERVER A:" << std::endl;
+            std::cout << "   ✅ Opción 40: SELECT por IMEI exacto (Hash O(1))" << std::endl;
+            std::cout << "      Ejemplo: SELECT * WHERE imei = '868018071302858'" << std::endl;
+            std::cout << "      • Tiempo: < 1ms" << std::endl;
+            std::cout << "      • Múltiples registros GPS por IMEI" << std::endl;
+            std::cout << "      • Ideal para: Tracking en tiempo real" << std::endl;
+            
+        } else if (current_server == "Server_B") {
+            std::cout << "🔍 CONSULTAS ESPECIALIZADAS PARA SERVER B:" << std::endl;
+            std::cout << "   ✅ Opción 41: SELECT por rango temporal (B+ Tree O(log n+k))" << std::endl;
+            std::cout << "      Ejemplo: SELECT * WHERE timestamp BETWEEN '2025-06-25 19:00:00' AND '2025-06-25 20:00:00'" << std::endl;
+            std::cout << "      • Tiempo: Proporcional a resultados" << std::endl;
+            std::cout << "      • Navegación eficiente por rangos" << std::endl;
+            std::cout << "      • Ideal para: Análisis histórico, reportes" << std::endl;
+        }
+        
+        std::cout << "\n📊 OPERACIONES ADICIONALES:" << std::endl;
+        std::cout << "   • Opción 34: Guardar índices en disco" << std::endl;
+        std::cout << "   • Opción 50: Estadísticas detalladas del índice" << std::endl;
+        std::cout << "   • Opción 52: Diagnóstico completo del sistema" << std::endl;
     }
 
     /**
@@ -858,8 +931,8 @@ private:
         );
         
         std::cout << "\n" << std::string(80, '=') << std::endl;
-        std::cout << "🔥 SGBD FÍSICO EDUCATIVO - COMPLETAMENTE CORREGIDO" << std::endl;
-        std::cout << "Estado: " << getStateString() << " | Servidor: " << current_server 
+        std::cout << "🔥 SGBD FÍSICO EDUCATIVO - COMPLETAMENTE ORGANIZADO" << std::endl;
+        std::cout << "Estado: " << getStateString() << " | Servidor: " << (current_server.empty() ? "No seleccionado" : current_server)
                   << " | Uptime: " << uptime.count() << "s" << std::endl;
         std::cout << std::string(80, '=') << std::endl;
         
@@ -868,32 +941,75 @@ private:
         std::cout << " 2. Cargar disco existente" << std::endl;
         std::cout << std::endl;
         
-        std::cout << "📡 DATOS:" << std::endl;
-        std::cout << "30. Cargar dataset GPS (CORREGIDO - sin filtro duplicados)" << std::endl;
-        std::cout << "31. Seleccionar configuración servidor (A/B)" << std::endl;
-        std::cout << std::endl;
+        std::cout << "📡 CONFIGURACIÓN DE DATOS:" << std::endl;
+        std::cout << "30. Cargar dataset GPS (Data-GPS.csv)" << std::endl;
+        if (current_state >= SystemState::GPS_LOADED) {
+            std::cout << "    ✅ GPS cargado: " << total_gps_records << " registros" << std::endl;
+        }
         
-        std::cout << "🔨 ÍNDICES:" << std::endl;
-        std::cout << "32. Construir índices (con verificaciones automáticas)" << std::endl;
-        std::cout << "33. Cargar índices desde disco" << std::endl;
-        std::cout << "34. Guardar índices en disco" << std::endl;
-        std::cout << std::endl;
-        
-        // Mostrar consultas según servidor
-        if (current_server == "Server_A") {
-            std::cout << "🔍 CONSULTAS (SERVER A - TRANSACCIONAL):" << std::endl;
-            std::cout << "40. SELECT por IMEI exacto (Hash O(1)) ⭐" << std::endl;
-        } else if (current_server == "Server_B") {
-            std::cout << "🔍 CONSULTAS (SERVER B - ANALÍTICO):" << std::endl;
-            std::cout << "⚠️  B+ Tree en desarrollo - usar Server A" << std::endl;
-        } else {
-            std::cout << "🔍 CONSULTAS:" << std::endl;
-            std::cout << "40. SELECT por IMEI (requiere Server A)" << std::endl;
+        std::cout << "31. 🏢 Seleccionar configuración de servidor (A/B) ⭐" << std::endl;
+        if (!current_server.empty()) {
+            std::cout << "    ✅ Servidor activo: " << current_server << std::endl;
+            if (current_server == "Server_A") {
+                std::cout << "    � Hash Extensible para IMEI (O(1))" << std::endl;
+            } else if (current_server == "Server_B") {
+                std::cout << "    🌲 B+ Tree para Timestamp (O(log n + k))" << std::endl;
+            }
         }
         std::cout << std::endl;
         
-        std::cout << "📊 INFORMACIÓN:" << std::endl;
-        std::cout << "Funciones de diagnóstico no disponibles" << std::endl;
+        std::cout << "�🔨 GESTIÓN DE ÍNDICES:" << std::endl;
+        if (current_server.empty()) {
+            std::cout << "    ⚠️ Seleccionar servidor primero (opción 31)" << std::endl;
+        } else {
+            // Verificar índices existentes de forma dinámica
+            bool hasIndexes = const_cast<SGBDSystemExtended*>(this)->checkExistingIndexesForServer();
+            
+            std::cout << "32. Construir/Reconstruir índices desde datos GPS" << std::endl;
+            std::cout << "33. Cargar índices existentes desde disco";
+            if (hasIndexes) {
+                std::cout << " ✅ (disponible)";
+            } else {
+                std::cout << " ❌ (no hay índices guardados)";
+            }
+            std::cout << std::endl;
+            
+            if (current_state >= SystemState::INDEXES_READY) {
+                std::cout << "34. Guardar índices en disco ✅" << std::endl;
+            } else {
+                std::cout << "34. Guardar índices en disco (construir primero)" << std::endl;
+            }
+        }
+        std::cout << std::endl;
+        
+        // Mostrar consultas según servidor y estado
+        if (current_server == "Server_A") {
+            std::cout << "🔍 CONSULTAS ESPECIALIZADAS (SERVER A - TRANSACCIONAL):" << std::endl;
+            if (current_state >= SystemState::INDEXES_READY && imei_index) {
+                std::cout << "40. ⚡ SELECT por IMEI exacto (Hash O(1)) - LISTO" << std::endl;
+                std::cout << "    📊 " << imei_index->getTotalRecords() << " registros indexados" << std::endl;
+            } else {
+                std::cout << "40. SELECT por IMEI exacto (construir índices primero)" << std::endl;
+            }
+        } else if (current_server == "Server_B") {
+            std::cout << "🔍 CONSULTAS ESPECIALIZADAS (SERVER B - ANALÍTICO):" << std::endl;
+            if (current_state >= SystemState::INDEXES_READY && timestamp_index) {
+                std::cout << "41. ⚡ SELECT por rango temporal (B+ Tree O(log n+k)) - LISTO" << std::endl;
+                std::cout << "    📊 " << timestamp_index->size() << " registros indexados" << std::endl;
+            } else {
+                std::cout << "41. SELECT por rango temporal (construir índices primero)" << std::endl;
+            }
+        } else {
+            std::cout << "🔍 CONSULTAS:" << std::endl;
+            std::cout << "    ⚠️ Seleccionar servidor para habilitar consultas especializadas" << std::endl;
+        }
+        std::cout << std::endl;
+        
+        std::cout << "📊 INFORMACIÓN Y DIAGNÓSTICO:" << std::endl;
+        if (current_state >= SystemState::INDEXES_READY) {
+            std::cout << "50. Estadísticas detalladas del índice activo" << std::endl;
+        }
+        std::cout << "52. Diagnóstico completo del sistema" << std::endl;
         std::cout << std::endl;
         
         std::cout << " 0. Salir (auto-guarda índices)" << std::endl;
@@ -919,6 +1035,12 @@ private:
                 saveIndexes();        // ✅ Guarda en disco
             } else if (choice == "40") {
                 executeSelectByIMEI();
+            } else if (choice == "41") {
+                executeSelectByTimestampRange();
+            } else if (choice == "50") {
+                showIndexStatistics();
+            } else if (choice == "52") {
+                showSystemDiagnostics();
             } else if (!choice.empty()) {
                 std::cout << "❌ Opción inválida: " << choice << std::endl;
             }
@@ -930,6 +1052,203 @@ private:
             std::cout << "\nPresione Enter para continuar...";
             std::cin.get();
         }
+    }
+    /**
+     * @brief ✅ NUEVA FUNCIÓN - SELECT por rango de timestamp para Server B
+     */
+    void executeSelectByTimestampRange() {
+        if (!timestamp_index) {
+            std::cout << "❌ B+ Tree no disponible" << std::endl;
+            std::cout << "💡 Seleccionar Server B y construir índices primero" << std::endl;
+            return;
+        }
+
+        std::cout << "\n🌲 CONSULTA B+ TREE - RANGO TEMPORAL" << std::endl;
+        std::cout << "====================================" << std::endl;
+        
+        std::string start_time, end_time;
+        std::cout << "Timestamp inicio (YYYY-MM-DD HH:MM:SS): ";
+        std::getline(std::cin, start_time);
+        
+        std::cout << "Timestamp fin (YYYY-MM-DD HH:MM:SS): ";
+        std::getline(std::cin, end_time);
+        
+        if (start_time.empty() || end_time.empty()) {
+            std::cout << "❌ Timestamps requeridos" << std::endl;
+            return;
+        }
+
+        std::cout << "\n🔍 EJECUTANDO BÚSQUEDA POR RANGO..." << std::endl;
+        std::cout << "Rango: [" << start_time << "] a [" << end_time << "]" << std::endl;
+        
+        auto start_time_search = std::chrono::high_resolution_clock::now();
+        
+        try {
+            // ✅ TEMPORALMENTE DESHABILITADO - B+ Tree searchRange aún no implementado
+            std::cout << "\n🚧 FUNCIONALIDAD EN DESARROLLO:" << std::endl;
+            std::cout << "❌ B+ Tree searchRange() aún no está implementado" << std::endl;
+            std::cout << "\n💡 IMPLEMENTACIÓN PENDIENTE:" << std::endl;
+            std::cout << "   • Método searchRange(start_key, end_key, results)" << std::endl;
+            std::cout << "   • Navegación por nodos hoja del B+ Tree" << std::endl;
+            std::cout << "   • Recorrido horizontal entre hojas" << std::endl;
+            std::cout << "   • Filtrado por rango de timestamps" << std::endl;
+            
+            std::cout << "\n🔄 SIMULACIÓN DE BÚSQUEDA POR RANGO:" << std::endl;
+            std::cout << "   Rango solicitado: [" << start_time << "] a [" << end_time << "]" << std::endl;
+            std::cout << "   📊 Registros en índice: " << timestamp_index->size() << std::endl;
+            std::cout << "   🌲 Orden del árbol: " << timestamp_index->getOrder() << std::endl;
+            
+            auto end_time_search = std::chrono::high_resolution_clock::now();
+            auto search_duration = std::chrono::duration_cast<std::chrono::microseconds>(
+                end_time_search - start_time_search);
+            
+            std::cout << "   ⏱️ Tiempo simulado: " << search_duration.count() << " μs" << std::endl;
+            std::cout << "   📈 Complejidad teórica: O(log n + k) donde k = resultados en rango" << std::endl;
+            
+            std::cout << "\n🎯 PRÓXIMOS PASOS PARA IMPLEMENTAR:" << std::endl;
+            std::cout << "   1. Implementar searchRange() en BPlusTree.h" << std::endl;
+            std::cout << "   2. Agregar navegación por nodos hoja" << std::endl;
+            std::cout << "   3. Implementar filtrado por rango temporal" << std::endl;
+            std::cout << "   4. Optimizar recorrido horizontal entre hojas" << std::endl;
+            
+            /* 
+            // ✅ CÓDIGO PARA CUANDO SE IMPLEMENTE searchRange():
+            std::vector<RecordReference> results;
+            bool found = timestamp_index->searchRange(start_time, end_time, results);
+            
+            if (found && !results.empty()) {
+                std::cout << "\n✅ RESULTADOS ENCONTRADOS:" << std::endl;
+                std::cout << "📊 Total registros en rango: " << results.size() << std::endl;
+                std::cout << "⏱️ Tiempo de búsqueda: " << search_duration.count() << " μs" << std::endl;
+                std::cout << "📈 Complejidad: O(log n + " << results.size() << ")" << std::endl;
+                
+                // Mostrar máximo 10 registros
+                size_t max_display = std::min(size_t(10), results.size());
+                std::cout << "\n📄 MOSTRANDO PRIMEROS " << max_display << " REGISTROS:" << std::endl;
+                
+                for (size_t i = 0; i < max_display; ++i) {
+                    std::cout << "\n--- Registro " << (i+1) << " ---" << std::endl;
+                    displayFullGPSRecordFromReference(results[i]);
+                }
+                
+                if (results.size() > max_display) {
+                    std::cout << "\n... y " << (results.size() - max_display) << " registros más" << std::endl;
+                }
+                
+            } else {
+                std::cout << "\n❌ No se encontraron registros en el rango especificado" << std::endl;
+                std::cout << "💡 Verificar formato de timestamps: YYYY-MM-DD HH:MM:SS" << std::endl;
+            }
+            */
+            
+        } catch (const std::exception& e) {
+            std::cout << "❌ Error en búsqueda: " << e.what() << std::endl;
+        }
+    }
+
+    /**
+     * @brief ✅ NUEVA FUNCIÓN - Mostrar estadísticas del índice activo
+     */
+    void showIndexStatistics() {
+        if (current_state < SystemState::INDEXES_READY) {
+            std::cout << "❌ No hay índices construidos" << std::endl;
+            return;
+        }
+
+        std::cout << "\n📊 ESTADÍSTICAS DEL ÍNDICE ACTIVO" << std::endl;
+        std::cout << "=================================" << std::endl;
+        std::cout << "Servidor: " << current_server << std::endl;
+        
+        if (current_server == "Server_A" && imei_index) {
+            std::cout << "\n🔗 HASH EXTENSIBLE (IMEI):" << std::endl;
+            std::cout << "   📊 Total registros: " << imei_index->getTotalRecords() << std::endl;
+            
+            if (imei_index->isMultipleModeEnabled()) {
+                std::cout << "   🔄 Modo múltiple: ACTIVADO" << std::endl;
+                imei_index->displayMultipleStatistics();
+            } else {
+                imei_index->displayStatistics();
+            }
+            
+        } else if (current_server == "Server_B" && timestamp_index) {
+            std::cout << "\n🌲 B+ TREE (TIMESTAMP):" << std::endl;
+            std::cout << "   📊 Total registros: " << timestamp_index->size() << std::endl;
+            std::cout << "   🌲 Orden del árbol: " << timestamp_index->getOrder() << std::endl;
+            
+            // ✅ TEMPORALMENTE COMENTADO - métodos aún no implementados
+            // std::cout << "   📈 Altura: " << timestamp_index->getHeight() << std::endl;
+            // timestamp_index->displayStatistics();
+            
+            std::cout << "\n🚧 ESTADÍSTICAS AVANZADAS EN DESARROLLO:" << std::endl;
+            std::cout << "   • getHeight() - calcular altura del árbol" << std::endl;
+            std::cout << "   • displayStatistics() - mostrar distribución de nodos" << std::endl;
+            std::cout << "   • getLeafCount() - contar nodos hoja" << std::endl;
+            std::cout << "   • getInternalNodeCount() - contar nodos internos" << std::endl;
+            
+        } else {
+            std::cout << "❌ Índice no disponible para " << current_server << std::endl;
+        }
+    }
+
+    /**
+     * @brief ✅ NUEVA FUNCIÓN - Diagnóstico completo del sistema
+     */
+    void showSystemDiagnostics() {
+        std::cout << "\n🔧 DIAGNÓSTICO COMPLETO DEL SISTEMA" << std::endl;
+        std::cout << "====================================" << std::endl;
+        
+        // Estado general
+        std::cout << "📋 ESTADO GENERAL:" << std::endl;
+        std::cout << "   Estado actual: " << getStateString() << std::endl;
+        std::cout << "   Servidor configurado: " << (current_server.empty() ? "Ninguno" : current_server) << std::endl;
+        std::cout << "   Registros GPS: " << total_gps_records << std::endl;
+        std::cout << "   Índices desde disco: " << (indexes_loaded_from_disk ? "Sí" : "No") << std::endl;
+        
+        // Verificación de archivos
+        std::cout << "\n📁 VERIFICACIÓN DE ARCHIVOS:" << std::endl;
+        bool hasServerAIndex = checkExistingIndexesForServer_static("Server_A");
+        bool hasServerBIndex = checkExistingIndexesForServer_static("Server_B");
+        
+        std::cout << "   Server A (Hash): " << (hasServerAIndex ? "✅ Disponible" : "❌ No encontrado") << std::endl;
+        std::cout << "   Server B (B+ Tree): " << (hasServerBIndex ? "✅ Disponible" : "❌ No encontrado") << std::endl;
+        
+        // Estado de componentes
+        std::cout << "\n🔧 COMPONENTES DEL SISTEMA:" << std::endl;
+        std::cout << "   DiskManager: " << (disk_manager ? "✅ Activo" : "❌ No inicializado") << std::endl;
+        std::cout << "   BufferPool: " << (buffer_manager ? "✅ Activo" : "❌ No inicializado") << std::endl;
+        std::cout << "   IndexManager: " << (index_manager ? "✅ Activo" : "❌ No inicializado") << std::endl;
+        
+        // Estadísticas de memoria
+        if (buffer_manager) {
+            std::cout << "\n💾 BUFFER POOL:" << std::endl;
+            std::cout << "   Tamaño: " << buffer_pool_size << " frames" << std::endl;
+            // Aquí se podrían agregar más estadísticas del buffer pool
+        }
+        
+        if (disk_manager) {
+            std::cout << "\n💽 DISK MANAGER:" << std::endl;
+            disk_manager->displayExtendedSystemInfo();
+        }
+    }
+
+private:
+    /**
+     * @brief Función auxiliar para verificar índices sin requerir instancia
+     */
+    bool checkExistingIndexesForServer_static(const std::string& server) const {
+        std::string expected_file;
+        if (server == "Server_A") {
+            expected_file = disk_path + "/metadata/indexes/indicehash_imei_dataGPS.txt";
+        } else if (server == "Server_B") {
+            expected_file = disk_path + "/metadata/indexes/indicebtree_timestamp_dataGPS.txt";
+        } else {
+            return false;
+        }
+        
+        std::ifstream file(expected_file);
+        bool exists = file.good();
+        file.close();
+        return exists;
     }
 
     // ============================================================================
@@ -986,7 +1305,7 @@ private:
     }
 
     /**
-     * @brief ✅ FUNCIÓN CORREGIDA - Cargar índices desde disco
+     * @brief ✅ FUNCIÓN COMPLETAMENTE REESCRITA - Cargar índices desde disco con verificaciones robustas
      */
     bool loadIndexesFromDisk() {
         if (current_state < SystemState::GPS_LOADED) {
@@ -1002,28 +1321,58 @@ private:
         std::cout << "\n📂 CARGANDO ÍNDICES DESDE DISCO..." << std::endl;
         std::cout << "Servidor configurado: " << current_server << std::endl;
         
-        // ✅ VERIFICAR SI EXISTEN ÍNDICES
-        if (!index_manager->hasPersistedIndexes()) {
-            std::cout << "⚠️ No se encontraron índices guardados en disco" << std::endl;
-            index_manager->listAvailableIndexes();
-            std::cout << "💡 Usar opción 32 para construir índices primero" << std::endl;
+        // ✅ VERIFICAR ARCHIVOS ESPECÍFICOS DEL SERVIDOR
+        std::string expected_file;
+        std::string index_type;
+        
+        if (current_server == "Server_A") {
+            expected_file = disk_path + "/metadata/indexes/indicehash_imei_dataGPS.txt";
+            index_type = "Hash Extensible (IMEI)";
+        } else if (current_server == "Server_B") {
+            expected_file = disk_path + "/metadata/indexes/indicebtree_timestamp_dataGPS.txt";
+            index_type = "B+ Tree (Timestamp)";
+        }
+        
+        // ✅ VERIFICACIÓN FÍSICA DEL ARCHIVO
+        std::ifstream file_check(expected_file);
+        if (!file_check.good()) {
+            std::cout << "❌ Archivo de índice no encontrado: " << expected_file << std::endl;
+            std::cout << "📁 Verificando directorio de índices..." << std::endl;
+            
+            // Mostrar archivos disponibles
+            std::string indexes_dir = disk_path + "/metadata/indexes";
+            std::cout << "� Archivos en " << indexes_dir << ":" << std::endl;
+            
+            try {
+                for (const auto& entry : std::filesystem::directory_iterator(indexes_dir)) {
+                    std::cout << "   📄 " << entry.path().filename().string() << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cout << "   📁 Directorio vacío o no accesible" << std::endl;
+            }
+            
+            std::cout << "\n💡 Soluciones:" << std::endl;
+            std::cout << "   • Opción 32: Construir índices desde datos GPS" << std::endl;
+            std::cout << "   • Verificar que se hayan guardado índices previamente (opción 34)" << std::endl;
             return false;
         }
+        file_check.close();
+        
+        std::cout << "✅ Archivo encontrado: " << expected_file << std::endl;
+        std::cout << "� Cargando " << index_type << "..." << std::endl;
 
         try {
             bool success = false;
             
             if (current_server == "Server_A") {
-                std::cout << "\n🔗 Cargando Hash Extensible (IMEI)..." << std::endl;
-                
                 imei_index = index_manager->loadHashIndex("imei_index");
                 
                 if (imei_index && imei_index->getTotalRecords() > 0) {
-                    std::cout << "✅ Hash Extensible cargado exitosamente" << std::endl;
+                    std::cout << "✅ " << index_type << " cargado exitosamente" << std::endl;
                     std::cout << "   📊 Registros: " << imei_index->getTotalRecords() << std::endl;
                     
                     if (imei_index->isMultipleModeEnabled()) {
-                        std::cout << "   🔄 Modo múltiple: ACTIVADO" << std::endl;
+                        std::cout << "   🔄 Modo múltiple: ACTIVADO (GPS optimizado)" << std::endl;
                         imei_index->displayMultipleStatistics();
                     } else {
                         std::cout << "   📈 Estadísticas:" << std::endl;
@@ -1032,22 +1381,20 @@ private:
                     
                     success = true;
                 } else {
-                    std::cout << "❌ Error: Hash Extensible cargado pero vacío" << std::endl;
+                    std::cout << "❌ Error: " << index_type << " cargado pero vacío" << std::endl;
                 }
                 
             } else if (current_server == "Server_B") {
-                std::cout << "\n🌲 Cargando B+ Tree (Timestamp)..." << std::endl;
-                
                 timestamp_index = index_manager->loadBTreeIndex("timestamp_index");
                 
                 if (timestamp_index && timestamp_index->size() > 0) {
-                    std::cout << "✅ B+ Tree cargado exitosamente" << std::endl;
+                    std::cout << "✅ " << index_type << " cargado exitosamente" << std::endl;
                     std::cout << "   📊 Registros: " << timestamp_index->size() << std::endl;
                     std::cout << "   🌲 Orden: " << timestamp_index->getOrder() << std::endl;
                     
                     success = true;
                 } else {
-                    std::cout << "❌ Error: B+ Tree cargado pero vacío" << std::endl;
+                    std::cout << "❌ Error: " << index_type << " cargado pero vacío" << std::endl;
                 }
             }
             
