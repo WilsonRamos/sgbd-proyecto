@@ -698,6 +698,395 @@ public:
         std::cout << "📂 Cargando B+ Tree Index: " << index_name << " (funcionalidad básica)" << std::endl;
         return nullptr;
     }
+
+    // ============================================================================
+    // ✅ PERSISTENCIA COMPLETA DE ÍNDICES
+    // ============================================================================
+
+    /**
+     * @brief ✅ FUNCIÓN COMPLETA - Guardar Hash Extensible en disco
+     */
+    bool saveHashIndex(const ExtensibleHash& hash_index, const std::string& index_name = "imei_index") {
+        if (!enable_persistence) {
+            std::cout << "⚠️ Persistencia deshabilitada" << std::endl;
+            return false;
+        }
+
+        try {
+            std::string file_path = index_data_path + "/" + index_name + "_hash.idx";
+            std::ofstream file(file_path, std::ios::binary);
+            
+            if (!file.is_open()) {
+                std::cout << "❌ No se pudo crear archivo: " << file_path << std::endl;
+                return false;
+            }
+
+            // ✅ SERIALIZAR METADATOS DEL ÍNDICE
+            std::string serialized_data = hash_index.serialize();
+            
+            // Escribir encabezado
+            std::string header = "EXTENSIBLE_HASH_INDEX_V1\n";
+            file << header;
+            
+            // Escribir timestamp
+            auto now = std::chrono::system_clock::now();
+            auto time_t = std::chrono::system_clock::to_time_t(now);
+            file << "CREATED_AT=" << time_t << "\n";
+            
+            // Escribir estadísticas
+            file << "TOTAL_RECORDS=" << hash_index.getTotalRecords() << "\n";
+            file << "BUCKET_CAPACITY=" << hash_index.getBucketCapacity() << "\n";
+            file << "MULTIPLE_MODE=" << (hash_index.isMultipleModeEnabled() ? "true" : "false") << "\n";
+            file << "END_METADATA\n";
+            
+            // Escribir datos serializados
+            file << serialized_data;
+            file.close();
+
+            // ✅ GUARDAR METADATOS EN ARCHIVO SEPARADO
+            saveIndexMetadata(index_name, "hash", hash_index.getTotalRecords());
+
+            std::cout << "✅ Hash Extensible guardado exitosamente:" << std::endl;
+            std::cout << "   📄 Archivo: " << file_path << std::endl;
+            std::cout << "   📊 Registros: " << hash_index.getTotalRecords() << std::endl;
+            std::cout << "   🗂️ Buckets: " << hash_index.getBucketCapacity() << std::endl;
+            std::cout << "   💾 Tamaño: " << std::filesystem::file_size(file_path) << " bytes" << std::endl;
+            
+            return true;
+            
+        } catch (const std::exception& e) {
+            std::cout << "❌ Error guardando Hash Extensible: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
+    /**
+     * @brief ✅ FUNCIÓN COMPLETA - Cargar Hash Extensible desde disco
+     */
+    std::unique_ptr<ExtensibleHash> loadHashIndex(const std::string& index_name = "imei_index") {
+        if (!enable_persistence) {
+            std::cout << "⚠️ Persistencia deshabilitada" << std::endl;
+            return nullptr;
+        }
+
+        std::string file_path = index_data_path + "/" + index_name + "_hash.idx";
+        
+        if (!std::filesystem::exists(file_path)) {
+            std::cout << "⚠️ Archivo de índice no existe: " << file_path << std::endl;
+            return nullptr;
+        }
+
+        try {
+            std::ifstream file(file_path, std::ios::binary);
+            if (!file.is_open()) {
+                std::cout << "❌ No se pudo abrir archivo: " << file_path << std::endl;
+                return nullptr;
+            }
+
+            std::cout << "📂 Cargando Hash Extensible desde: " << file_path << std::endl;
+
+            // ✅ LEER Y VERIFICAR ENCABEZADO
+            std::string line;
+            std::getline(file, line);
+            if (line != "EXTENSIBLE_HASH_INDEX_V1") {
+                std::cout << "❌ Formato de archivo inválido" << std::endl;
+                return nullptr;
+            }
+
+            // ✅ LEER METADATOS
+            std::map<std::string, std::string> metadata;
+            while (std::getline(file, line) && line != "END_METADATA") {
+                size_t pos = line.find('=');
+                if (pos != std::string::npos) {
+                    std::string key = line.substr(0, pos);
+                    std::string value = line.substr(pos + 1);
+                    metadata[key] = value;
+                }
+            }
+
+            // ✅ EXTRAER CONFIGURACIÓN
+            size_t total_records = std::stoull(metadata["TOTAL_RECORDS"]);
+            int bucket_capacity = std::stoi(metadata["BUCKET_CAPACITY"]);
+            bool multiple_mode = (metadata["MULTIPLE_MODE"] == "true");
+            
+            std::cout << "   📊 Metadatos leídos:" << std::endl;
+            std::cout << "      • Total registros: " << total_records << std::endl;
+            std::cout << "      • Capacidad bucket: " << bucket_capacity << std::endl;
+            std::cout << "      • Modo múltiple: " << (multiple_mode ? "SÍ" : "NO") << std::endl;
+
+            // ✅ LEER DATOS SERIALIZADOS
+            std::stringstream remaining_content;
+            while (std::getline(file, line)) {
+                remaining_content << line << "\n";
+            }
+            file.close();
+
+            // ✅ CREAR Y DESERIALIZAR ÍNDICE
+            auto hash_index = std::make_unique<ExtensibleHash>(bucket_capacity, multiple_mode);
+            
+            if (multiple_mode) {
+                hash_index->enableMultipleMode();
+            }
+
+            if (!hash_index->deserialize(remaining_content.str())) {
+                std::cout << "❌ Error deserializando datos del índice" << std::endl;
+                return nullptr;
+            }
+
+            std::cout << "✅ Hash Extensible cargado exitosamente:" << std::endl;
+            std::cout << "   📊 Registros restaurados: " << hash_index->getTotalRecords() << std::endl;
+            std::cout << "   🔄 Modo múltiple: " << (hash_index->isMultipleModeEnabled() ? "ACTIVADO" : "DESACTIVADO") << std::endl;
+            
+            return hash_index;
+            
+        } catch (const std::exception& e) {
+            std::cout << "❌ Error cargando Hash Extensible: " << e.what() << std::endl;
+            return nullptr;
+        }
+    }
+
+    /**
+     * @brief ✅ FUNCIÓN COMPLETA - Guardar B+ Tree en disco
+     */
+    bool saveBTreeIndex(const BPlusTree<std::string>& btree_index, const std::string& index_name = "timestamp_index") {
+        if (!enable_persistence) {
+            std::cout << "⚠️ Persistencia deshabilitada" << std::endl;
+            return false;
+        }
+
+        try {
+            std::string file_path = index_data_path + "/" + index_name + "_btree.idx";
+            std::ofstream file(file_path, std::ios::binary);
+            
+            if (!file.is_open()) {
+                std::cout << "❌ No se pudo crear archivo: " << file_path << std::endl;
+                return false;
+            }
+
+            // ✅ SERIALIZAR B+ TREE
+            std::string serialized_data = btree_index.serialize();
+            
+            // Escribir encabezado
+            std::string header = "BPLUS_TREE_INDEX_V1\n";
+            file << header;
+            
+            // Escribir metadatos
+            auto now = std::chrono::system_clock::now();
+            auto time_t = std::chrono::system_clock::to_time_t(now);
+            file << "CREATED_AT=" << time_t << "\n";
+            file << "TOTAL_RECORDS=" << btree_index.size() << "\n";
+            file << "ORDER=" << btree_index.getOrder() << "\n";
+            file << "END_METADATA\n";
+            
+            // Escribir datos serializados
+            file << serialized_data;
+            file.close();
+
+            // ✅ GUARDAR METADATOS
+            saveIndexMetadata(index_name, "btree", btree_index.size());
+
+            std::cout << "✅ B+ Tree guardado exitosamente:" << std::endl;
+            std::cout << "   📄 Archivo: " << file_path << std::endl;
+            std::cout << "   📊 Registros: " << btree_index.size() << std::endl;
+            std::cout << "   🌲 Orden: " << btree_index.getOrder() << std::endl;
+            std::cout << "   💾 Tamaño: " << std::filesystem::file_size(file_path) << " bytes" << std::endl;
+            
+            return true;
+            
+        } catch (const std::exception& e) {
+            std::cout << "❌ Error guardando B+ Tree: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
+    /**
+     * @brief ✅ FUNCIÓN COMPLETA - Cargar B+ Tree desde disco
+     */
+    std::unique_ptr<BPlusTree<std::string>> loadBTreeIndex(const std::string& index_name = "timestamp_index") {
+        if (!enable_persistence) {
+            std::cout << "⚠️ Persistencia deshabilitada" << std::endl;
+            return nullptr;
+        }
+
+        std::string file_path = index_data_path + "/" + index_name + "_btree.idx";
+        
+        if (!std::filesystem::exists(file_path)) {
+            std::cout << "⚠️ Archivo de índice B+ Tree no existe: " << file_path << std::endl;
+            return nullptr;
+        }
+
+        try {
+            std::ifstream file(file_path, std::ios::binary);
+            if (!file.is_open()) {
+                std::cout << "❌ No se pudo abrir archivo: " << file_path << std::endl;
+                return nullptr;
+            }
+
+            std::cout << "📂 Cargando B+ Tree desde: " << file_path << std::endl;
+
+            // ✅ LEER Y VERIFICAR ENCABEZADO
+            std::string line;
+            std::getline(file, line);
+            if (line != "BPLUS_TREE_INDEX_V1") {
+                std::cout << "❌ Formato de archivo B+ Tree inválido" << std::endl;
+                return nullptr;
+            }
+
+            // ✅ LEER METADATOS
+            std::map<std::string, std::string> metadata;
+            while (std::getline(file, line) && line != "END_METADATA") {
+                size_t pos = line.find('=');
+                if (pos != std::string::npos) {
+                    std::string key = line.substr(0, pos);
+                    std::string value = line.substr(pos + 1);
+                    metadata[key] = value;
+                }
+            }
+
+            size_t total_records = std::stoull(metadata["TOTAL_RECORDS"]);
+            int order = std::stoi(metadata["ORDER"]);
+            
+            std::cout << "   📊 Metadatos B+ Tree:" << std::endl;
+            std::cout << "      • Total registros: " << total_records << std::endl;
+            std::cout << "      • Orden del árbol: " << order << std::endl;
+
+            // ✅ LEER Y DESERIALIZAR
+            std::stringstream remaining_content;
+            while (std::getline(file, line)) {
+                remaining_content << line << "\n";
+            }
+            file.close();
+
+            auto btree_index = std::make_unique<BPlusTree<std::string>>(order);
+            
+            if (!btree_index->deserialize(remaining_content.str())) {
+                std::cout << "❌ Error deserializando B+ Tree" << std::endl;
+                return nullptr;
+            }
+
+            std::cout << "✅ B+ Tree cargado exitosamente:" << std::endl;
+            std::cout << "   📊 Registros restaurados: " << btree_index->size() << std::endl;
+            
+            return btree_index;
+            
+        } catch (const std::exception& e) {
+            std::cout << "❌ Error cargando B+ Tree: " << e.what() << std::endl;
+            return nullptr;
+        }
+    }
+
+private:
+    /**
+     * @brief ✅ NUEVA FUNCIÓN - Guardar metadatos de índices
+     */
+    void saveIndexMetadata(const std::string& index_name, const std::string& type, size_t record_count) {
+        try {
+            std::string metadata_file = metadata_path + "/indexes_metadata.txt";
+            std::ofstream file(metadata_file, std::ios::app);
+            
+            if (file.is_open()) {
+                auto now = std::chrono::system_clock::now();
+                auto time_t = std::chrono::system_clock::to_time_t(now);
+                
+                file << index_name << "|" << type << "|" << record_count << "|" << time_t << "\n";
+                file.close();
+                
+                index_metadata[index_name + "_" + type] = record_count;
+            }
+        } catch (...) {
+            // Ignorar errores de metadatos
+        }
+    }
+
+public:
+    /**
+     * @brief ✅ NUEVA FUNCIÓN - Verificar si existen índices guardados
+     */
+    bool hasPersistedIndexes() const {
+        if (!enable_persistence || !std::filesystem::exists(index_data_path)) {
+            return false;
+        }
+        
+        bool has_hash = std::filesystem::exists(index_data_path + "/imei_index_hash.idx");
+        bool has_btree = std::filesystem::exists(index_data_path + "/timestamp_index_btree.idx");
+        
+        return has_hash || has_btree;
+    }
+
+    /**
+     * @brief ✅ NUEVA FUNCIÓN - Listar índices disponibles
+     */
+    void listAvailableIndexes() const {
+        std::cout << "\n📂 ÍNDICES DISPONIBLES EN DISCO:" << std::endl;
+        std::cout << "================================" << std::endl;
+        
+        if (!std::filesystem::exists(index_data_path)) {
+            std::cout << "   📁 Directorio de índices no existe" << std::endl;
+            return;
+        }
+        
+        bool found_any = false;
+        
+        for (const auto& entry : std::filesystem::directory_iterator(index_data_path)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".idx") {
+                found_any = true;
+                auto file_size = std::filesystem::file_size(entry);
+                
+                std::string filename = entry.path().filename().string();
+                std::string type = (filename.find("_hash.idx") != std::string::npos) ? "Hash Extensible" : "B+ Tree";
+                
+                std::cout << "   📄 " << filename << std::endl;
+                std::cout << "      • Tipo: " << type << std::endl;
+                std::cout << "      • Tamaño: " << file_size << " bytes" << std::endl;
+                std::cout << "      • Estado: Disponible para carga" << std::endl;
+                std::cout << std::endl;
+            }
+        }
+        
+        if (!found_any) {
+            std::cout << "   ⚠️ No se encontraron índices guardados" << std::endl;
+            std::cout << "   💡 Construir índices primero (opción 32)" << std::endl;
+        }
+    }
+
+    /**
+     * @brief ✅ NUEVA FUNCIÓN - Cargar metadatos de índices
+     */
+    void loadIndexMetadata() {
+        std::string metadata_file = metadata_path + "/indexes_metadata.txt";
+        
+        if (!std::filesystem::exists(metadata_file)) {
+            return;
+        }
+        
+        std::ifstream file(metadata_file);
+        std::string line;
+        
+        while (std::getline(file, line)) {
+            auto parts = split(line, '|');
+            if (parts.size() >= 3) {
+                std::string key = parts[0] + "_" + parts[1];
+                size_t count = std::stoull(parts[2]);
+                index_metadata[key] = count;
+            }
+        }
+    }
+
+private:
+    /**
+     * @brief Función auxiliar para split de strings
+     */
+    std::vector<std::string> split(const std::string& str, char delimiter) {
+        std::vector<std::string> tokens;
+        std::stringstream ss(str);
+        std::string token;
+        
+        while (std::getline(ss, token, delimiter)) {
+            tokens.push_back(token);
+        }
+        
+        return tokens;
+    }
 };
 
 #endif // INDEX_MANAGER_H

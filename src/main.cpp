@@ -885,11 +885,10 @@ private:
             std::cout << "40. SELECT por IMEI exacto (Hash O(1)) ⭐" << std::endl;
         } else if (current_server == "Server_B") {
             std::cout << "🔍 CONSULTAS (SERVER B - ANALÍTICO):" << std::endl;
-            std::cout << "41. SELECT por rango timestamp (B+ Tree O(log n+k)) ⭐" << std::endl;
+            std::cout << "⚠️  B+ Tree en desarrollo - usar Server A" << std::endl;
         } else {
             std::cout << "🔍 CONSULTAS:" << std::endl;
             std::cout << "40. SELECT por IMEI (requiere Server A)" << std::endl;
-            std::cout << "41. SELECT por rango timestamp (requiere Server B)" << std::endl;
         }
         std::cout << std::endl;
         
@@ -897,7 +896,6 @@ private:
         std::cout << "50. Estadísticas de índices" << std::endl;
         std::cout << "51. Estructura del sistema" << std::endl;
         std::cout << "52. Diagnóstico completo del sistema" << std::endl;
-        std::cout << "53. Sincronizar PageDirectory manualmente" << std::endl;
         std::cout << std::endl;
         
         std::cout << " 0. Salir (auto-guarda índices)" << std::endl;
@@ -916,23 +914,17 @@ private:
             } else if (choice == "31") {
                 selectServerConfiguration();
             } else if (choice == "32") {
-                initializeIndexes();
+                initializeIndexes();  // ✅ Construye índices
             } else if (choice == "33") {
-                loadIndexesFromDisk();
+                loadIndexesFromDisk(); // ✅ Carga desde disco
             } else if (choice == "34") {
-                saveIndexes();
+                saveIndexes();        // ✅ Guarda en disco
             } else if (choice == "40") {
                 executeSelectByIMEI();
-            } else if (choice == "41") {
-                executeSelectByTimestampRange();
             } else if (choice == "50") {
                 showIndexStatistics();
-            } else if (choice == "51") {
-                showSystemArchitecture();
             } else if (choice == "52") {
                 showDiskStructure();
-            } else if (choice == "53") {
-                forceSyncPageDirectory();
             } else if (!choice.empty()) {
                 std::cout << "❌ Opción inválida: " << choice << std::endl;
             }
@@ -999,15 +991,292 @@ private:
         return datasets;
     }
 
-    // Métodos auxiliares restantes (implementaciones simples)
-    bool loadIndexesFromDisk() { return true; }
-    void saveIndexes() { if (index_manager) index_manager->displayIndexInfo(); }
-    void executeSelectByTimestampRange() { std::cout << "🌲 B+ Tree timestamp search - implementar" << std::endl; }
-    void showIndexStatistics() { std::cout << "📊 Index statistics - implementar" << std::endl; }
-    void showSystemArchitecture() { std::cout << "🏗️ System architecture - implementar" << std::endl; }
-    void showDiskStructure() { if (disk_manager) disk_manager->displayExtendedSystemInfo(); }
-    void forceSyncPageDirectory() { if (disk_manager) disk_manager->forcePageDirectorySync(); }
+    /**
+     * @brief ✅ FUNCIÓN CORREGIDA - Cargar índices desde disco
+     */
+    bool loadIndexesFromDisk() {
+        if (current_state < SystemState::GPS_LOADED) {
+            std::cout << "❌ Datos GPS no cargados - usar opción 30 primero" << std::endl;
+            return false;
+        }
+        
+        if (current_server.empty()) {
+            std::cout << "❌ Servidor no seleccionado - usar opción 31 primero" << std::endl;
+            return false;
+        }
+
+        std::cout << "\n📂 CARGANDO ÍNDICES DESDE DISCO..." << std::endl;
+        std::cout << "Servidor configurado: " << current_server << std::endl;
+        
+        // ✅ VERIFICAR SI EXISTEN ÍNDICES
+        if (!index_manager->hasPersistedIndexes()) {
+            std::cout << "⚠️ No se encontraron índices guardados en disco" << std::endl;
+            index_manager->listAvailableIndexes();
+            std::cout << "💡 Usar opción 32 para construir índices primero" << std::endl;
+            return false;
+        }
+
+        try {
+            bool success = false;
+            
+            if (current_server == "Server_A") {
+                std::cout << "\n🔗 Cargando Hash Extensible (IMEI)..." << std::endl;
+                
+                imei_index = index_manager->loadHashIndex("imei_index");
+                
+                if (imei_index && imei_index->getTotalRecords() > 0) {
+                    std::cout << "✅ Hash Extensible cargado exitosamente" << std::endl;
+                    std::cout << "   📊 Registros: " << imei_index->getTotalRecords() << std::endl;
+                    
+                    if (imei_index->isMultipleModeEnabled()) {
+                        std::cout << "   🔄 Modo múltiple: ACTIVADO" << std::endl;
+                        imei_index->displayMultipleStatistics();
+                    } else {
+                        std::cout << "   📈 Estadísticas:" << std::endl;
+                        imei_index->displayStatistics();
+                    }
+                    
+                    success = true;
+                } else {
+                    std::cout << "❌ Error: Hash Extensible cargado pero vacío" << std::endl;
+                }
+                
+            } else if (current_server == "Server_B") {
+                std::cout << "\n🌲 Cargando B+ Tree (Timestamp)..." << std::endl;
+                
+                timestamp_index = index_manager->loadBTreeIndex("timestamp_index");
+                
+                if (timestamp_index && timestamp_index->size() > 0) {
+                    std::cout << "✅ B+ Tree cargado exitosamente" << std::endl;
+                    std::cout << "   📊 Registros: " << timestamp_index->size() << std::endl;
+                    std::cout << "   🌲 Orden: " << timestamp_index->getOrder() << std::endl;
+                    
+                    success = true;
+                } else {
+                    std::cout << "❌ Error: B+ Tree cargado pero vacío" << std::endl;
+                }
+            }
+            
+            if (success) {
+                current_state = SystemState::INDEXES_READY;
+                indexes_loaded_from_disk = true;
+                
+                std::cout << "\n🎯 ÍNDICES CARGADOS DESDE DISCO - LISTOS PARA CONSULTAS" << std::endl;
+                showAvailableOperations();
+                
+                return true;
+            }
+            
+        } catch (const std::exception& e) {
+            std::cout << "❌ Error cargando índices: " << e.what() << std::endl;
+        }
+        
+        return false;
+    }
+
+    /**
+     * @brief ✅ FUNCIÓN CORREGIDA - Guardar índices en disco
+     */
+    void saveIndexes() {
+        std::cout << "\n💾 GUARDANDO ÍNDICES EN DISCO..." << std::endl;
+        
+        if (current_state < SystemState::INDEXES_READY) {
+            std::cout << "⚠️ No hay índices construidos para guardar" << std::endl;
+            std::cout << "💡 Usar opción 32 para construir índices primero" << std::endl;
+            return;
+        }
+
+        bool saved_any = false;
+        
+        try {
+            if (current_server == "Server_A" && imei_index) {
+                std::cout << "\n🔗 Guardando Hash Extensible (IMEI)..." << std::endl;
+                
+                if (index_manager->saveHashIndex(*imei_index, "imei_index")) {
+                    std::cout << "✅ Hash Extensible guardado exitosamente" << std::endl;
+                    saved_any = true;
+                } else {
+                    std::cout << "❌ Error guardando Hash Extensible" << std::endl;
+                }
+            }
+            
+            if (current_server == "Server_B" && timestamp_index) {
+                std::cout << "\n🌲 Guardando B+ Tree (Timestamp)..." << std::endl;
+                
+                if (index_manager->saveBTreeIndex(*timestamp_index, "timestamp_index")) {
+                    std::cout << "✅ B+ Tree guardado exitosamente" << std::endl;
+                    saved_any = true;
+                } else {
+                    std::cout << "❌ Error guardando B+ Tree" << std::endl;
+                }
+            }
+            
+            if (saved_any) {
+                std::cout << "\n✅ ÍNDICES GUARDADOS CORRECTAMENTE" << std::endl;
+                std::cout << "📁 Ubicación: ./bin/mi_disco_sgbde/metadata/indexes/" << std::endl;
+                std::cout << "💡 Usar opción 33 para cargar en futuras sesiones" << std::endl;
+            } else {
+                std::cout << "\n⚠️ No se guardaron índices" << std::endl;
+                std::cout << "💡 Verificar que los índices estén construidos correctamente" << std::endl;
+            }
+            
+        } catch (const std::exception& e) {
+            std::cout << "❌ Error durante guardado: " << e.what() << std::endl;
+        }
+        
+        // ✅ MOSTRAR INFORMACIÓN ADICIONAL
+        index_manager->listAvailableIndexes();
+    }
 };
+
+// ============================================================================
+// FUNCIONES DE INFORMACIÓN Y DIAGNÓSTICO
+// ============================================================================
+
+void showIndexStatistics() {
+    std::cout << "\n🔍 ESTADÍSTICAS DE ÍNDICES DEL SISTEMA\n";
+    std::cout << "=====================================\n";
+    
+    std::cout << "📊 HASH EXTENSIBLE (IMEI):\n";
+    std::cout << "  • Estado: Implementado y funcional\n";
+    std::cout << "  • Modo múltiples registros: SÍ\n";
+    std::cout << "  • Almacena: vector<RecordReference> por IMEI\n";
+    std::cout << "  • Complejidad búsqueda: O(1) para acceso + O(k) para resolución\n";
+    
+    std::cout << "\n🌳 B+ TREE (TIMESTAMP):\n";
+    std::cout << "  • Estado: En desarrollo\n";
+    std::cout << "  • Implementación: Planificada para consultas por rango\n";
+    std::cout << "  • Propósito: SELECT por rango de fechas\n";
+    
+    std::cout << "\n💾 ESTRUCTURA DE DISCO:\n";
+    
+    // Contar archivos de datos
+    std::filesystem::path disk_path = "mi_disco_sgbde";
+    if (std::filesystem::exists(disk_path)) {
+        int total_sectors = 0;
+        try {
+            for (auto& p : std::filesystem::recursive_directory_iterator(disk_path)) {
+                if (p.is_regular_file() && p.path().filename().string().find("sector_") == 0) {
+                    total_sectors++;
+                }
+            }
+            std::cout << "  • Total sectores con datos: " << total_sectors << "\n";
+            std::cout << "  • Directorio de páginas: Activo\n";
+        } catch (...) {
+            std::cout << "  • Error accediendo estructura de disco\n";
+        }
+    } else {
+        std::cout << "  • Disco no encontrado\n";
+    }
+    
+    std::cout << "\n";
+}
+
+
+void showDiskStructure() {
+    std::cout << "\n💾 ESTRUCTURA DETALLADA DEL DISCO\n";
+    std::cout << "=================================\n";
+    
+    std::filesystem::path disk_path = "mi_disco_sgbde";
+    
+    if (!std::filesystem::exists(disk_path)) {
+        std::cout << "❌ Disco no encontrado en: " << disk_path << "\n";
+        return;
+    }
+    
+    std::cout << "📁 DIRECTORIO RAÍZ: " << disk_path << "\n\n";
+    
+    // Mostrar estructura de metadatos
+    std::filesystem::path metadata_path = disk_path / "metadata";
+    if (std::filesystem::exists(metadata_path)) {
+        std::cout << "📋 METADATOS:\n";
+        try {
+            for (auto& entry : std::filesystem::directory_iterator(metadata_path)) {
+                if (entry.is_regular_file()) {
+                    auto size = std::filesystem::file_size(entry);
+                    std::cout << "  • " << entry.path().filename().string() 
+                             << " (" << size << " bytes)\n";
+                }
+            }
+        } catch (...) {
+            std::cout << "  • Error accediendo metadatos\n";
+        }
+        std::cout << "\n";
+    }
+    
+    // Mostrar estructura de platos
+    std::filesystem::path platter_path = disk_path / "platter_0" / "surface_0";
+    if (std::filesystem::exists(platter_path)) {
+        std::cout << "💿 DATOS FÍSICOS (PLATTER 0, SURFACE 0):\n";
+        
+        int total_tracks = 0;
+        int total_sectors = 0;
+        
+        try {
+            for (auto& track_entry : std::filesystem::directory_iterator(platter_path)) {
+                if (track_entry.is_directory()) {
+                    total_tracks++;
+                    
+                    // Contar sectores en este track
+                    for (auto& sector_entry : std::filesystem::directory_iterator(track_entry)) {
+                        if (sector_entry.is_regular_file() && 
+                            sector_entry.path().filename().string().find("sector_") == 0) {
+                            total_sectors++;
+                        }
+                    }
+                }
+            }
+            
+            std::cout << "  • Total tracks: " << total_tracks << "\n";
+            std::cout << "  • Total sectores con datos: " << total_sectors << "\n";
+            
+            // Mostrar algunos ejemplos de tracks
+            std::cout << "  • Estructura ejemplo:\n";
+            int count = 0;
+            for (auto& track_entry : std::filesystem::directory_iterator(platter_path)) {
+                if (track_entry.is_directory() && count < 3) {
+                    std::cout << "    └── " << track_entry.path().filename().string() << "/\n";
+                    
+                    // Mostrar algunos sectores de ejemplo
+                    int sector_count = 0;
+                    for (auto& sector_entry : std::filesystem::directory_iterator(track_entry)) {
+                        if (sector_entry.is_regular_file() && sector_count < 2) {
+                            auto size = std::filesystem::file_size(sector_entry);
+                            std::cout << "        ├── " << sector_entry.path().filename().string() 
+                                     << " (" << size << " bytes)\n";
+                            sector_count++;
+                        }
+                    }
+                    count++;
+                }
+            }
+            if (total_tracks > 3) {
+                std::cout << "    └── ... y " << (total_tracks - 3) << " tracks más\n";
+            }
+        } catch (...) {
+            std::cout << "  • Error accediendo estructura física\n";
+        }
+    }
+    
+    // Mostrar información de índices si existen
+    std::filesystem::path indices_path = metadata_path / "indexes";
+    if (std::filesystem::exists(indices_path)) {
+        std::cout << "\n🗂️ ÍNDICES GUARDADOS:\n";
+        try {
+            for (auto& entry : std::filesystem::directory_iterator(indices_path)) {
+                if (entry.is_regular_file()) {
+                    auto size = std::filesystem::file_size(entry);
+                    std::cout << "  • " << entry.path().filename().string() 
+                             << " (" << size << " bytes)\n";
+                }
+            }
+        } catch (...) {
+            std::cout << "  • Error accediendo índices guardados\n";
+        }
+    }
+    
+    std::cout << "\n";
+}
 
 // ============================================================================
 // FUNCIÓN PRINCIPAL
