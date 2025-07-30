@@ -676,31 +676,7 @@ public:
     }
 
     // ============================================================================
-    // PERSISTENCIA DE ÍNDICES (IMPLEMENTACIÓN BÁSICA)
-    // ============================================================================
-    
-    bool saveHashIndex(const ExtensibleHash& hash_index, const std::string& index_name = "imei_index") {
-        std::cout << "💾 Guardando Hash Index: " << index_name << " (funcionalidad básica)" << std::endl;
-        return true;
-    }
-
-    std::unique_ptr<ExtensibleHash> loadHashIndex(const std::string& index_name = "imei_index") {
-        std::cout << "📂 Cargando Hash Index: " << index_name << " (funcionalidad básica)" << std::endl;
-        return nullptr;
-    }
-
-    bool saveBTreeIndex(const BPlusTree<std::string>& btree_index, const std::string& index_name = "timestamp_index") {
-        std::cout << "💾 Guardando B+ Tree Index: " << index_name << " (funcionalidad básica)" << std::endl;
-        return true;
-    }
-
-    std::unique_ptr<BPlusTree<std::string>> loadBTreeIndex(const std::string& index_name = "timestamp_index") {
-        std::cout << "📂 Cargando B+ Tree Index: " << index_name << " (funcionalidad básica)" << std::endl;
-        return nullptr;
-    }
-
-    // ============================================================================
-    // ✅ PERSISTENCIA COMPLETA DE ÍNDICES
+    // ✅ MÉTODOS DE VERIFICACIÓN Y DIAGNÓSTICO
     // ============================================================================
 
     /**

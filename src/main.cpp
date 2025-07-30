@@ -893,9 +893,7 @@ private:
         std::cout << std::endl;
         
         std::cout << "📊 INFORMACIÓN:" << std::endl;
-        std::cout << "50. Estadísticas de índices" << std::endl;
-        std::cout << "51. Estructura del sistema" << std::endl;
-        std::cout << "52. Diagnóstico completo del sistema" << std::endl;
+        std::cout << "Funciones de diagnóstico no disponibles" << std::endl;
         std::cout << std::endl;
         
         std::cout << " 0. Salir (auto-guarda índices)" << std::endl;
@@ -921,10 +919,6 @@ private:
                 saveIndexes();        // ✅ Guarda en disco
             } else if (choice == "40") {
                 executeSelectByIMEI();
-            } else if (choice == "50") {
-                showIndexStatistics();
-            } else if (choice == "52") {
-                showDiskStructure();
             } else if (!choice.empty()) {
                 std::cout << "❌ Opción inválida: " << choice << std::endl;
             }
@@ -1128,160 +1122,6 @@ private:
         index_manager->listAvailableIndexes();
     }
 };
-
-// ============================================================================
-// FUNCIONES DE INFORMACIÓN Y DIAGNÓSTICO
-// ============================================================================
-
-void showIndexStatistics() {
-    std::cout << "\n🔍 ESTADÍSTICAS DE ÍNDICES DEL SISTEMA\n";
-    std::cout << "=====================================\n";
-    
-    std::cout << "📊 HASH EXTENSIBLE (IMEI):\n";
-    std::cout << "  • Estado: Implementado y funcional\n";
-    std::cout << "  • Modo múltiples registros: SÍ\n";
-    std::cout << "  • Almacena: vector<RecordReference> por IMEI\n";
-    std::cout << "  • Complejidad búsqueda: O(1) para acceso + O(k) para resolución\n";
-    
-    std::cout << "\n🌳 B+ TREE (TIMESTAMP):\n";
-    std::cout << "  • Estado: En desarrollo\n";
-    std::cout << "  • Implementación: Planificada para consultas por rango\n";
-    std::cout << "  • Propósito: SELECT por rango de fechas\n";
-    
-    std::cout << "\n💾 ESTRUCTURA DE DISCO:\n";
-    
-    // Contar archivos de datos
-    std::filesystem::path disk_path = "mi_disco_sgbde";
-    if (std::filesystem::exists(disk_path)) {
-        int total_sectors = 0;
-        try {
-            for (auto& p : std::filesystem::recursive_directory_iterator(disk_path)) {
-                if (p.is_regular_file() && p.path().filename().string().find("sector_") == 0) {
-                    total_sectors++;
-                }
-            }
-            std::cout << "  • Total sectores con datos: " << total_sectors << "\n";
-            std::cout << "  • Directorio de páginas: Activo\n";
-        } catch (...) {
-            std::cout << "  • Error accediendo estructura de disco\n";
-        }
-    } else {
-        std::cout << "  • Disco no encontrado\n";
-    }
-    
-    std::cout << "\n";
-}
-
-
-void showDiskStructure() {
-    std::cout << "\n💾 ESTRUCTURA DETALLADA DEL DISCO\n";
-    std::cout << "=================================\n";
-    
-    std::filesystem::path disk_path = "mi_disco_sgbde";
-    
-    if (!std::filesystem::exists(disk_path)) {
-        std::cout << "❌ Disco no encontrado en: " << disk_path << "\n";
-        return;
-    }
-    
-    std::cout << "📁 DIRECTORIO RAÍZ: " << disk_path << "\n\n";
-    
-    // Mostrar estructura de metadatos
-    std::filesystem::path metadata_path = disk_path / "metadata";
-    if (std::filesystem::exists(metadata_path)) {
-        std::cout << "📋 METADATOS:\n";
-        try {
-            for (auto& entry : std::filesystem::directory_iterator(metadata_path)) {
-                if (entry.is_regular_file()) {
-                    auto size = std::filesystem::file_size(entry);
-                    std::cout << "  • " << entry.path().filename().string() 
-                             << " (" << size << " bytes)\n";
-                }
-            }
-        } catch (...) {
-            std::cout << "  • Error accediendo metadatos\n";
-        }
-        std::cout << "\n";
-    }
-    
-    // Mostrar estructura de platos
-    std::filesystem::path platter_path = disk_path / "platter_0" / "surface_0";
-    if (std::filesystem::exists(platter_path)) {
-        std::cout << "💿 DATOS FÍSICOS (PLATTER 0, SURFACE 0):\n";
-        
-        int total_tracks = 0;
-        int total_sectors = 0;
-        
-        try {
-            for (auto& track_entry : std::filesystem::directory_iterator(platter_path)) {
-                if (track_entry.is_directory()) {
-                    total_tracks++;
-                    
-                    // Contar sectores en este track
-                    for (auto& sector_entry : std::filesystem::directory_iterator(track_entry)) {
-                        if (sector_entry.is_regular_file() && 
-                            sector_entry.path().filename().string().find("sector_") == 0) {
-                            total_sectors++;
-                        }
-                    }
-                }
-            }
-            
-            std::cout << "  • Total tracks: " << total_tracks << "\n";
-            std::cout << "  • Total sectores con datos: " << total_sectors << "\n";
-            
-            // Mostrar algunos ejemplos de tracks
-            std::cout << "  • Estructura ejemplo:\n";
-            int count = 0;
-            for (auto& track_entry : std::filesystem::directory_iterator(platter_path)) {
-                if (track_entry.is_directory() && count < 3) {
-                    std::cout << "    └── " << track_entry.path().filename().string() << "/\n";
-                    
-                    // Mostrar algunos sectores de ejemplo
-                    int sector_count = 0;
-                    for (auto& sector_entry : std::filesystem::directory_iterator(track_entry)) {
-                        if (sector_entry.is_regular_file() && sector_count < 2) {
-                            auto size = std::filesystem::file_size(sector_entry);
-                            std::cout << "        ├── " << sector_entry.path().filename().string() 
-                                     << " (" << size << " bytes)\n";
-                            sector_count++;
-                        }
-                    }
-                    count++;
-                }
-            }
-            if (total_tracks > 3) {
-                std::cout << "    └── ... y " << (total_tracks - 3) << " tracks más\n";
-            }
-        } catch (...) {
-            std::cout << "  • Error accediendo estructura física\n";
-        }
-    }
-    
-    // Mostrar información de índices si existen
-    std::filesystem::path indices_path = metadata_path / "indexes";
-    if (std::filesystem::exists(indices_path)) {
-        std::cout << "\n🗂️ ÍNDICES GUARDADOS:\n";
-        try {
-            for (auto& entry : std::filesystem::directory_iterator(indices_path)) {
-                if (entry.is_regular_file()) {
-                    auto size = std::filesystem::file_size(entry);
-                    std::cout << "  • " << entry.path().filename().string() 
-                             << " (" << size << " bytes)\n";
-                }
-            }
-        } catch (...) {
-            std::cout << "  • Error accediendo índices guardados\n";
-        }
-    }
-    
-    std::cout << "\n";
-}
-
-// ============================================================================
-// FUNCIÓN PRINCIPAL
-// ============================================================================
-
 int main() {
     try {
         #ifdef _WIN32
